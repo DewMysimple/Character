@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.vite/
+
+# Local reference media and extracted review frames.
+*.mp4
+_analysis_frames/
+
+# Local editor and OS files.
+.DS_Store
+Thumbs.db
+*.log
+
