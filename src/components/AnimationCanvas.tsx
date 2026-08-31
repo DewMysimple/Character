@@ -95,6 +95,27 @@ export function AnimationCanvas({
       engine.setViewport(viewportWidth, viewportHeight);
     };
 
+    const updatePointer = (event: PointerEvent) => {
+      const bounds = canvas.getBoundingClientRect();
+      const stage = fitStage(bounds.width, bounds.height);
+      const x = (event.clientX - bounds.left - stage.offsetX) / stage.scale;
+      const y = (event.clientY - bounds.top - stage.offsetY) / stage.scale;
+      if (x < 0 || x > DESIGN_WIDTH || y < 0 || y > DESIGN_HEIGHT) {
+        engine.setPointer(null);
+        return;
+      }
+      engine.setPointer({ x, y });
+    };
+
+    const clearPointer = () => {
+      engine.setPointer(null);
+    };
+
+    canvas.addEventListener("pointerenter", updatePointer);
+    canvas.addEventListener("pointermove", updatePointer);
+    canvas.addEventListener("pointerleave", clearPointer);
+    canvas.addEventListener("pointercancel", clearPointer);
+
     const observer = new ResizeObserver(resize);
     observer.observe(wrapper);
     resize();
@@ -131,6 +152,11 @@ export function AnimationCanvas({
       cancelAnimationFrame(frameId);
       window.clearInterval(snapshotTimer);
       observer.disconnect();
+      canvas.removeEventListener("pointerenter", updatePointer);
+      canvas.removeEventListener("pointermove", updatePointer);
+      canvas.removeEventListener("pointerleave", clearPointer);
+      canvas.removeEventListener("pointercancel", clearPointer);
+      engine.setPointer(null);
       engineRef.current = null;
     };
   }, [onSnapshot]);

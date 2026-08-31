@@ -9,6 +9,7 @@ import {
   type GlyphParticle,
   type PhysicsConfig,
   type SceneSnapshot,
+  type ScenePointer,
   type Stage,
   type StemSeed,
 } from "./types";
@@ -229,13 +230,26 @@ const drawStem = (
   context.restore();
 };
 
-const drawFlower = (context: CanvasRenderingContext2D, flower: Flower) => {
+const getFlowerSway = (flower: Flower, motionTime: number, windStrength: number) => {
+  const naturalAmplitude = 2.5 + Math.abs(flower.sway) * 0.12;
+  const naturalSway =
+    Math.sin(motionTime * 0.68 + flower.windPhase) * naturalAmplitude * (0.35 + windStrength);
+  return flower.sway + naturalSway + flower.pointerOffset;
+};
+
+const drawFlower = (
+  context: CanvasRenderingContext2D,
+  flower: Flower,
+  motionTime: number,
+  windStrength: number,
+) => {
   if (!flower.activated || flower.stemProgress <= 0) return;
 
   const stemProgress = easeOutCubic(flower.stemProgress);
   const leafProgress = easeOutCubic(flower.leafProgress);
   const petalProgress = easeOutCubic(flower.petalProgress);
-  const tipX = flower.x + flower.sway * Math.sin(stemProgress * Math.PI);
+  const dynamicSway = getFlowerSway(flower, motionTime, windStrength);
+  const tipX = flower.x + dynamicSway * Math.sin(stemProgress * Math.PI);
   const tipY = flower.groundY - flower.height * easeOutCubic(flower.stemProgress);
 
   context.save();
@@ -245,7 +259,7 @@ const drawFlower = (context: CanvasRenderingContext2D, flower: Flower) => {
   context.beginPath();
   context.moveTo(flower.x, flower.groundY);
   context.quadraticCurveTo(
-    flower.x + flower.sway,
+    flower.x + dynamicSway,
     flower.groundY - flower.height * 0.45,
     tipX,
     tipY,
@@ -254,7 +268,7 @@ const drawFlower = (context: CanvasRenderingContext2D, flower: Flower) => {
 
   if (leafProgress > 0) {
     const leafY = flower.groundY - flower.height * 0.48;
-    const leafX = flower.x + flower.sway * 0.54;
+    const leafX = flower.x + dynamicSway * 0.54;
     context.fillStyle = "rgba(144, 157, 142, 0.58)";
     context.beginPath();
     context.ellipse(
@@ -366,6 +380,7 @@ export class SceneEngine {
   private stems: StemSeed[] = [];
   private viewport = { width: DESIGN_WIDTH, height: DESIGN_HEIGHT };
   private backgroundCanvas: HTMLCanvasElement | null = null;
+  private pointer: ScenePointer | null = null;
 
   constructor(config: PhysicsConfig = DEFAULT_PHYSICS, seed = 47) {
     this.config = { ...config };
@@ -377,6 +392,10 @@ export class SceneEngine {
     if (width === this.viewport.width && height === this.viewport.height) return;
     this.viewport = { width, height };
     this.backgroundCanvas = null;
+  }
+
+  setPointer(pointer: ScenePointer | null) {
+    this.pointer = pointer;
   }
 
   setConfig(nextConfig: PhysicsConfig) {
@@ -448,7 +467,9 @@ export class SceneEngine {
     drawCodeCard(context, this.time, this.glyphs);
     drawTitle(context, this.time);
     this.stems.forEach((stem) => drawStem(context, stem, this.time));
-    this.flowers.forEach((flower) => drawFlower(context, flower));
+    this.flowers.forEach((flower) =>
+      drawFlower(context, flower, this.motionTime, this.config.flowerWindStrength),
+    );
     this.renderGlyphs(context);
     this.butterflies.forEach((butterfly) => drawButterfly(context, butterfly));
   }
@@ -515,10 +536,15 @@ export class SceneEngine {
       }
     });
 
+    this.updateFlowerPointer(delta);
+
     const orbitSpeed = clamp(this.config.butterflyOrbitSpeed, 0.2, 2.4);
     const tilt = (this.config.butterflyOrbitTilt * Math.PI) / 180;
     const tiltCos = Math.cos(tilt);
     const tiltSin = Math.sin(tilt);
+    const pointer = this.config.pointerInteractionEnabled ? this.pointer : null;
+    const pointerRadius = Math.max(1, this.config.butterflyPointerRadius);
+    const pointerFalloff = Math.max(0.1, this.config.pointerFalloff);
 
     this.butterflies.forEach((butterfly) => {
       const age = Math.max(0, this.motionTime - butterfly.birthTime);
@@ -552,15 +578,40 @@ export class SceneEngine {
         tiltedY;
       const distanceX = orbitX - butterfly.x;
       const distanceY = orbitY - butterfly.y;
+      let pointerInfluence = 0;
+      let pointerDirectionX = 0;
+      let pointerDirectionY = 0;
+      if (pointer) {
+        const pointerDistanceX = butterfly.x - pointer.x;
+        const pointerDistanceY = butterfly.y - pointer.y;
+        const pointerDistance = Math.hypot(pointerDistanceX, pointerDistanceY);
+        if (pointerDistance < pointerRadius) {
+          pointerInfluence = (1 - pointerDistance / pointerRadius) ** pointerFalloff;
+          if (pointerDistance > 0.001) {
+            pointerDirectionX = pointerDistanceX / pointerDistance;
+            pointerDirectionY = pointerDistanceY / pointerDistance;
+          } else {
+            const fallbackAngle = butterfly.seed * 0.37;
+            pointerDirectionX = Math.cos(fallbackAngle);
+            pointerDirectionY = Math.sin(fallbackAngle);
+          }
+        }
+      }
       const drift = Math.cos(age * 2.7 + butterfly.seed) * 0.018;
       const steering =
         0.00022 +
         this.config.butterflyFlowerAttraction * 0.0012 +
-        this.config.centerAttraction * 0.00004;
+        this.config.centerAttraction * 0.00004 +
+        this.config.butterflyPointerReturn * (1 - pointerInfluence) * 0.00082;
       butterfly.vx +=
         (distanceX * steering + drift + this.config.wind * 0.0012) * delta * 60;
       butterfly.vy +=
         (distanceY * steering + Math.sin(age * 2.2 + butterfly.seed) * 0.014) * delta * 60;
+      if (pointerInfluence > 0) {
+        const repulsion = this.config.butterflyPointerRepulsion * pointerInfluence * 0.064;
+        butterfly.vx += pointerDirectionX * repulsion * delta * 60;
+        butterfly.vy += pointerDirectionY * repulsion * delta * 60;
+      }
       butterfly.vx *= 0.982;
       butterfly.vy *= 0.982;
       const flightSpeed = Math.hypot(butterfly.vx, butterfly.vy);
@@ -571,6 +622,12 @@ export class SceneEngine {
       }
       butterfly.x += butterfly.vx * delta * 60;
       butterfly.y += butterfly.vy * delta * 60;
+      const safeX = clamp(butterfly.x, 22, DESIGN_WIDTH - 22);
+      const safeY = clamp(butterfly.y, BUTTERFLY_ZONE_TOP - 86, DESIGN_HEIGHT - 92);
+      if (safeX !== butterfly.x) butterfly.vx = 0;
+      if (safeY !== butterfly.y) butterfly.vy = 0;
+      butterfly.x = safeX;
+      butterfly.y = safeY;
       butterfly.rotation += butterfly.rotationSpeed * delta * 60 + butterfly.vx * 0.0006;
       butterfly.alpha = 0.9 * easeOutCubic(clamp(age / 0.34, 0, 1));
 
@@ -683,8 +740,53 @@ export class SceneEngine {
   }
 
   private updateButterflyFlightTarget(butterfly: Butterfly) {
+    const flower = this.flowers[butterfly.targetFlowerId];
+    if (flower) {
+      const dynamicSway = getFlowerSway(
+        flower,
+        this.motionTime,
+        this.config.flowerWindStrength,
+      );
+      butterfly.flowerX = flower.x + dynamicSway * 0.45 + butterfly.flowerOffsetX;
+      butterfly.flowerY = flower.groundY - flower.height;
+    }
     butterfly.targetX = clamp(butterfly.flowerX, 34, DESIGN_WIDTH - 34);
     butterfly.targetY = clamp(butterfly.flowerY, BUTTERFLY_ZONE_TOP - 18, DESIGN_HEIGHT - 112);
+  }
+
+  private updateFlowerPointer(delta: number) {
+    const pointer = this.config.pointerInteractionEnabled ? this.pointer : null;
+    const pointerRadius = Math.max(1, this.config.flowerPointerRadius);
+    const pointerFalloff = Math.max(0.1, this.config.pointerFalloff);
+
+    this.flowers.forEach((flower) => {
+      const dynamicSway = getFlowerSway(
+        flower,
+        this.motionTime,
+        this.config.flowerWindStrength,
+      );
+      const headX = flower.x + dynamicSway * 0.45;
+      const headY = flower.groundY - flower.height;
+      let targetOffset = 0;
+
+      if (pointer) {
+        const distanceX = headX - pointer.x;
+        const distanceY = headY - pointer.y;
+        const distance = Math.hypot(distanceX, distanceY);
+        if (distance < pointerRadius) {
+          const influence = (1 - distance / pointerRadius) ** pointerFalloff;
+          const direction = distance > 0.001 ? distanceX / distance : 0;
+          targetOffset = direction * 48 * this.config.flowerPointerStrength * influence;
+        }
+      }
+
+      const responseRate =
+        targetOffset === 0
+          ? this.config.flowerPointerReturn
+          : this.config.flowerPointerResponse;
+      const smoothing = 1 - Math.exp(-Math.max(0.01, responseRate) * delta * 4);
+      flower.pointerOffset += (targetOffset - flower.pointerOffset) * smoothing;
+    });
   }
 
   private buildStems() {
@@ -719,6 +821,8 @@ export class SceneEngine {
         leafProgress: 0,
         petalProgress: 0,
         activated: false,
+        windPhase: seededRandom(seed + 10) * Math.PI * 2,
+        pointerOffset: 0,
       });
     }
   }
@@ -727,8 +831,9 @@ export class SceneEngine {
     const id = this.butterflies.length;
     const targetFlowerId = id % this.flowers.length;
     const targetFlower = this.flowers[targetFlowerId];
+    const flowerOffsetX = (seededRandom(glyph.seed + 13) - 0.5) * 24;
     const flowerX =
-      targetFlower.x + targetFlower.sway * 0.45 + (seededRandom(glyph.seed + 13) - 0.5) * 24;
+      targetFlower.x + targetFlower.sway * 0.45 + flowerOffsetX;
     const flowerY = targetFlower.groundY - targetFlower.height;
     const baseScale = 0.43 + seededRandom(glyph.seed + 12) * 0.36;
     const butterfly: Butterfly = {
@@ -748,6 +853,7 @@ export class SceneEngine {
       targetFlowerId,
       flowerX,
       flowerY,
+      flowerOffsetX,
       targetX: DESIGN_WIDTH / 2,
       targetY: (BUTTERFLY_ZONE_TOP + BUTTERFLY_ZONE_BOTTOM) / 2,
       orbitRadius: 0.78 + seededRandom(glyph.seed + 15) * 0.44,

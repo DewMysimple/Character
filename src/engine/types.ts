@@ -28,6 +28,16 @@ export interface PhysicsConfig {
   butterflyFlowerAttraction: number;
   butterflyFlightSpeed: number;
   butterflyScale: number;
+  pointerInteractionEnabled: boolean;
+  flowerWindStrength: number;
+  flowerPointerRadius: number;
+  flowerPointerStrength: number;
+  flowerPointerResponse: number;
+  flowerPointerReturn: number;
+  pointerFalloff: number;
+  butterflyPointerRadius: number;
+  butterflyPointerRepulsion: number;
+  butterflyPointerReturn: number;
 }
 
 export interface GlyphParticle {
@@ -72,6 +82,7 @@ export interface Butterfly {
   targetFlowerId: number;
   flowerX: number;
   flowerY: number;
+  flowerOffsetX: number;
   targetX: number;
   targetY: number;
   orbitRadius: number;
@@ -93,6 +104,8 @@ export interface Flower {
   leafProgress: number;
   petalProgress: number;
   activated: boolean;
+  windPhase: number;
+  pointerOffset: number;
 }
 
 export interface StemSeed {
@@ -119,6 +132,11 @@ export interface SceneViewport {
   height: number;
 }
 
+export interface ScenePointer {
+  x: number;
+  y: number;
+}
+
 export const DEFAULT_PHYSICS: PhysicsConfig = {
   gravity: 1,
   wind: 0.24,
@@ -139,4 +157,14 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   butterflyFlowerAttraction: 0.72,
   butterflyFlightSpeed: 1,
   butterflyScale: 1,
+  pointerInteractionEnabled: true,
+  flowerWindStrength: 0.28,
+  flowerPointerRadius: 170,
+  flowerPointerStrength: 0.55,
+  flowerPointerResponse: 0.85,
+  flowerPointerReturn: 0.65,
+  pointerFalloff: 1.25,
+  butterflyPointerRadius: 150,
+  butterflyPointerRepulsion: 1,
+  butterflyPointerReturn: 0.95,
 };

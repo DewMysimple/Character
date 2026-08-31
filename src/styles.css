@@ -74,6 +74,7 @@ button {
   display: block;
   width: 100%;
   height: 100%;
+  touch-action: none;
 }
 
 .scene-caption {
@@ -445,6 +446,68 @@ input[type="range"]:focus-visible {
   color: #899189;
   font-size: 10px;
   text-align: right;
+}
+
+.pointer-toggle {
+  gap: 8px;
+}
+
+.toggle-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+}
+
+.toggle-input {
+  position: absolute;
+  z-index: 1;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.toggle-visual {
+  display: flex;
+  align-items: center;
+  width: 48px;
+  height: 26px;
+  padding: 3px;
+  border: 1px solid rgba(75, 101, 86, 0.24);
+  border-radius: 999px;
+  background: rgba(75, 101, 86, 0.1);
+  transition-property: background-color, border-color;
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.toggle-visual span {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #8b938a;
+  box-shadow: 0 2px 4px rgba(56, 70, 59, 0.2);
+  transition-property: background-color, transform;
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.toggle-input:checked + .toggle-visual {
+  border-color: rgba(75, 101, 86, 0.46);
+  background: var(--accent);
+}
+
+.toggle-input:checked + .toggle-visual span {
+  background: #f8f6ef;
+  transform: translateX(21px);
+}
+
+.toggle-input:focus-visible + .toggle-visual {
+  outline: 3px solid rgba(102, 128, 113, 0.28);
+  outline-offset: 3px;
 }
 
 .motion-note {

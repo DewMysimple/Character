@@ -267,9 +267,99 @@ export function ControlPanel({
             />
           </div>
         </ParameterSection>
+
+        <ParameterSection title="指针扰动" note="移入画布即可互动">
+          <div className="parameters-grid">
+            <PointerInteractionControl
+              enabled={config.pointerInteractionEnabled}
+              onChange={(value) => onConfigChange("pointerInteractionEnabled", value)}
+            />
+            <Parameter
+              label="花朵自然风动"
+              value={config.flowerWindStrength}
+              min={0}
+              max={1}
+              step={0.01}
+              display={`${Math.round(config.flowerWindStrength * 100)}%`}
+              onChange={(value) => onConfigChange("flowerWindStrength", value)}
+            />
+            <Parameter
+              label="花朵影响半径"
+              value={config.flowerPointerRadius}
+              min={80}
+              max={300}
+              step={1}
+              display={`${Math.round(config.flowerPointerRadius)}px`}
+              onChange={(value) => onConfigChange("flowerPointerRadius", value)}
+            />
+            <Parameter
+              label="花朵扰动幅度"
+              value={config.flowerPointerStrength}
+              min={0}
+              max={1.4}
+              step={0.05}
+              display={formatValue(config.flowerPointerStrength)}
+              onChange={(value) => onConfigChange("flowerPointerStrength", value)}
+            />
+            <Parameter
+              label="花朵响应速度"
+              value={config.flowerPointerResponse}
+              min={0.2}
+              max={2}
+              step={0.05}
+              display={`${formatValue(config.flowerPointerResponse)}x`}
+              onChange={(value) => onConfigChange("flowerPointerResponse", value)}
+            />
+            <Parameter
+              label="花朵回归速度"
+              value={config.flowerPointerReturn}
+              min={0.2}
+              max={2}
+              step={0.05}
+              display={`${formatValue(config.flowerPointerReturn)}x`}
+              onChange={(value) => onConfigChange("flowerPointerReturn", value)}
+            />
+            <Parameter
+              label="指针衰减"
+              value={config.pointerFalloff}
+              min={0.6}
+              max={2.4}
+              step={0.05}
+              display={formatValue(config.pointerFalloff)}
+              onChange={(value) => onConfigChange("pointerFalloff", value)}
+            />
+            <Parameter
+              label="蝴蝶排斥半径"
+              value={config.butterflyPointerRadius}
+              min={50}
+              max={260}
+              step={1}
+              display={`${Math.round(config.butterflyPointerRadius)}px`}
+              onChange={(value) => onConfigChange("butterflyPointerRadius", value)}
+            />
+            <Parameter
+              label="蝴蝶排斥强度"
+              value={config.butterflyPointerRepulsion}
+              min={0}
+              max={2.4}
+              step={0.05}
+              display={formatValue(config.butterflyPointerRepulsion)}
+              onChange={(value) => onConfigChange("butterflyPointerRepulsion", value)}
+            />
+            <Parameter
+              label="蝴蝶回归速度"
+              value={config.butterflyPointerReturn}
+              min={0.2}
+              max={2.4}
+              step={0.05}
+              display={`${formatValue(config.butterflyPointerReturn)}x`}
+              onChange={(value) => onConfigChange("butterflyPointerReturn", value)}
+            />
+          </div>
+        </ParameterSection>
       </div>
 
-      <p className="motion-note">每只蝴蝶绑定一朵花，围绕花头形成独立轨道。半径、倾角、呼吸和漂移都会实时作用于完成态。</p>
+      <p className="motion-note">每只蝴蝶绑定一朵花，围绕花头形成独立轨道。指针靠近时花朵产生左右涟漪，蝴蝶会避开指针并在离开影响范围后回到花朵。</p>
     </aside>
   );
 }
@@ -313,6 +403,34 @@ function FlowerOrbitModeControl() {
         <span>每只蝴蝶跟随自己的花头</span>
       </div>
     </div>
+  );
+}
+
+interface PointerInteractionControlProps {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}
+
+function PointerInteractionControl({ enabled, onChange }: PointerInteractionControlProps) {
+  return (
+    <label className="parameter-control parameter-control-wide pointer-toggle">
+      <span className="parameter-topline">
+        <span>指针互动</span>
+        <output>{enabled ? "开启" : "关闭"}</output>
+      </span>
+      <span className="toggle-control">
+        <input
+          className="toggle-input"
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) => onChange(event.target.checked)}
+          aria-label="指针互动"
+        />
+        <span className="toggle-visual" aria-hidden="true">
+          <span />
+        </span>
+      </span>
+    </label>
   );
 }
 
