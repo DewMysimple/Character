@@ -519,21 +519,26 @@ export class SceneEngine {
       const age = Math.max(0, this.motionTime - butterfly.birthTime);
       butterfly.flightPhase += delta * 7.2;
       butterfly.wingPhase += delta * this.config.wingBeatFrequency * Math.PI * 2;
-      const spread = this.config.butterflySpread;
-      const wideDriftX = Math.sin(age * 0.42 + butterfly.seed) * 42 * spread;
-      const wideDriftY = Math.cos(age * 0.36 + butterfly.seed * 0.7) * 38 * spread;
+      this.updateButterflyFlightTarget(butterfly);
+      butterfly.scale = butterfly.baseScale * this.config.butterflyScale;
+      const roam = this.config.butterflyRoam;
+      const wideDriftX = Math.sin(age * 0.42 + butterfly.seed) * 42 * roam;
+      const wideDriftY = Math.cos(age * 0.36 + butterfly.seed * 0.7) * 38 * roam;
       const orbitX =
         butterfly.targetX +
         wideDriftX +
-        Math.sin(age * 1.18 + butterfly.flightPhase) * butterfly.orbitRadius * spread;
+        Math.sin(age * 1.18 + butterfly.flightPhase) * butterfly.orbitRadius * roam;
       const orbitY =
         butterfly.targetY +
         wideDriftY +
-        Math.cos(age * 1.42 + butterfly.flightPhase) * butterfly.orbitHeight * spread;
+        Math.cos(age * 1.42 + butterfly.flightPhase) * butterfly.orbitHeight * roam;
       const distanceX = orbitX - butterfly.x;
       const distanceY = orbitY - butterfly.y;
       const drift = Math.cos(age * 2.7 + butterfly.seed) * 0.018;
-      const steering = 0.00075 + this.config.centerAttraction * 0.00055;
+      const steering =
+        0.00042 +
+        this.config.butterflyCohesion * 0.0009 +
+        this.config.centerAttraction * 0.0002;
       const canopyLift =
         (BUTTERFLY_ZONE_TOP - butterfly.y) * 0.00006 +
         (BUTTERFLY_ZONE_BOTTOM - butterfly.y) * 0.000018;
@@ -544,9 +549,10 @@ export class SceneEngine {
       butterfly.vx *= 0.982;
       butterfly.vy *= 0.982;
       const flightSpeed = Math.hypot(butterfly.vx, butterfly.vy);
-      if (flightSpeed > 6.4) {
-        butterfly.vx = (butterfly.vx / flightSpeed) * 6.4;
-        butterfly.vy = (butterfly.vy / flightSpeed) * 6.4;
+      const maxFlightSpeed = 6.4 * this.config.butterflyFlightSpeed;
+      if (flightSpeed > maxFlightSpeed) {
+        butterfly.vx = (butterfly.vx / flightSpeed) * maxFlightSpeed;
+        butterfly.vy = (butterfly.vy / flightSpeed) * maxFlightSpeed;
       }
       butterfly.x += butterfly.vx * delta * 60;
       butterfly.y += butterfly.vy * delta * 60;
@@ -661,6 +667,44 @@ export class SceneEngine {
     );
   }
 
+  private updateButterflyFlightTarget(butterfly: Butterfly) {
+    const { seed } = butterfly;
+    const xSeed = seededRandom(seed + 31);
+    const ySeed = seededRandom(seed + 37);
+    const horizontalSpread = clamp(this.config.butterflyHorizontalSpread, 0.35, 1.2);
+    const verticalSpread = clamp(this.config.butterflyVerticalSpread, 0.35, 1.15);
+    const centerX = DESIGN_WIDTH / 2;
+    const centerY = 492;
+    let targetX = centerX;
+    let targetY = centerY;
+
+    switch (this.config.butterflyDistribution) {
+      case "sides": {
+        const side = xSeed < 0.5 ? -1 : 1;
+        const sideDistance = 178 + ySeed * 122;
+        targetX = centerX + side * sideDistance * horizontalSpread;
+        targetY = 478 + (seededRandom(seed + 43) * 2 - 1) * 188 * verticalSpread;
+        break;
+      }
+      case "center":
+        targetX = centerX + (xSeed * 2 - 1) * 182 * horizontalSpread;
+        targetY = 446 + (ySeed * 2 - 1) * 116 * verticalSpread;
+        break;
+      case "full-field":
+        targetX = centerX + (xSeed * 2 - 1) * 350 * horizontalSpread;
+        targetY = 462 + (ySeed * 2 - 1) * 236 * verticalSpread;
+        break;
+      case "canopy":
+      default:
+        targetX = centerX + (xSeed * 2 - 1) * 316 * horizontalSpread;
+        targetY = 492 + (ySeed * 2 - 1) * 180 * verticalSpread;
+        break;
+    }
+
+    butterfly.targetX = clamp(targetX, 34, DESIGN_WIDTH - 34);
+    butterfly.targetY = clamp(targetY, BUTTERFLY_ZONE_TOP - 18, BUTTERFLY_ZONE_BOTTOM + 18);
+  }
+
   private buildStems() {
     this.stems = [];
     for (let index = 0; index < 23; index += 1) {
@@ -704,18 +748,8 @@ export class SceneEngine {
     const flowerX =
       targetFlower.x + targetFlower.sway * 0.45 + (seededRandom(glyph.seed + 13) - 0.5) * 24;
     const flowerY = targetFlower.groundY - targetFlower.height;
-    const targetX = clamp(
-      flowerX + (seededRandom(glyph.seed + 19) - 0.5) * 150,
-      36,
-      DESIGN_WIDTH - 36,
-    );
-    const canopyBias = seededRandom(glyph.seed + 14);
-    const targetY = clamp(
-      350 + canopyBias * 292 + (flowerY - 650) * 0.22,
-      BUTTERFLY_ZONE_TOP,
-      BUTTERFLY_ZONE_BOTTOM,
-    );
-    this.butterflies.push({
+    const baseScale = 0.43 + seededRandom(glyph.seed + 12) * 0.36;
+    const butterfly: Butterfly = {
       id,
       x: glyph.x,
       y: glyph.y,
@@ -723,7 +757,8 @@ export class SceneEngine {
       vy: glyph.vy * 0.08 + seededRandom(glyph.seed + 10) * 0.18,
       rotation: glyph.rotation,
       rotationSpeed: (seededRandom(glyph.seed + 11) - 0.5) * 0.032,
-      scale: 0.43 + seededRandom(glyph.seed + 12) * 0.36,
+      scale: baseScale * this.config.butterflyScale,
+      baseScale,
       alpha: 0,
       birthTime: this.motionTime,
       color: glyph.color,
@@ -731,14 +766,16 @@ export class SceneEngine {
       targetFlowerId,
       flowerX,
       flowerY,
-      targetX,
-      targetY,
+      targetX: DESIGN_WIDTH / 2,
+      targetY: (BUTTERFLY_ZONE_TOP + BUTTERFLY_ZONE_BOTTOM) / 2,
       orbitRadius: 28 + seededRandom(glyph.seed + 15) * 52,
       orbitHeight: 20 + seededRandom(glyph.seed + 16) * 46,
       flightPhase: seededRandom(glyph.seed + 17) * Math.PI * 2,
       wingPhase: seededRandom(glyph.seed + 18) * Math.PI * 2,
       flowerLinked: false,
-    });
+    };
+    this.updateButterflyFlightTarget(butterfly);
+    this.butterflies.push(butterfly);
   }
 
   private activateFlower(flowerId: number, earliestTriggerAt: number) {

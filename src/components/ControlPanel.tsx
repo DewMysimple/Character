@@ -1,5 +1,11 @@
+import type { ReactNode } from "react";
 import { STAGE_LABELS } from "../engine/scene";
-import type { CollapseMode, PhysicsConfig, SceneSnapshot } from "../engine/types";
+import type {
+  ButterflyDistribution,
+  CollapseMode,
+  PhysicsConfig,
+  SceneSnapshot,
+} from "../engine/types";
 
 interface ControlPanelProps {
   config: PhysicsConfig;
@@ -85,7 +91,7 @@ export function ControlPanel({
       </div>
 
       <div className="parameter-heading">
-        <span>物理参数</span>
+        <span>实验参数</span>
         <div className="parameter-heading-actions">
           <span className="parameter-hint">实时生效</span>
           <button className="reset-button" type="button" onClick={onResetConfig}>
@@ -94,95 +100,153 @@ export function ControlPanel({
         </div>
       </div>
 
-      <div className="parameters-grid">
-        <CollapseModeControl
-          value={config.collapseMode}
-          onChange={(value) => onConfigChange("collapseMode", value)}
-        />
-        <Parameter
-          label="播放速度"
-          value={config.speed}
-          min={0.25}
-          max={1.75}
-          step={0.05}
-          display={`${formatValue(config.speed)}x`}
-          onChange={(value) => onConfigChange("speed", value)}
-        />
-        <Parameter
-          label="重力"
-          value={config.gravity}
-          min={0.35}
-          max={1.8}
-          step={0.05}
-          display={formatValue(config.gravity)}
-          onChange={(value) => onConfigChange("gravity", value)}
-        />
-        <Parameter
-          label="风力"
-          value={config.wind}
-          min={-1.2}
-          max={1.2}
-          step={0.05}
-          display={formatValue(config.wind)}
-          onChange={(value) => onConfigChange("wind", value)}
-        />
-        <Parameter
-          label="中心吸引"
-          value={config.centerAttraction}
-          min={0}
-          max={1.6}
-          step={0.05}
-          display={formatValue(config.centerAttraction)}
-          onChange={(value) => onConfigChange("centerAttraction", value)}
-        />
-        <Parameter
-          label="坍塌时长"
-          value={config.collapseDuration}
-          min={0.7}
-          max={2.4}
-          step={0.05}
-          display={`${formatValue(config.collapseDuration)}s`}
-          onChange={(value) => onConfigChange("collapseDuration", value)}
-        />
-        <Parameter
-          label="变形时长"
-          value={config.morphDuration}
-          min={0.45}
-          max={1.8}
-          step={0.05}
-          display={`${formatValue(config.morphDuration)}s`}
-          onChange={(value) => onConfigChange("morphDuration", value)}
-        />
-        <Parameter
-          label="字符数量"
-          value={config.particleCount}
-          min={120}
-          max={480}
-          step={10}
-          display={String(config.particleCount)}
-          onChange={(value) => onConfigChange("particleCount", value)}
-        />
-        <Parameter
-          label="扇翅频率"
-          value={config.wingBeatFrequency}
-          min={1.2}
-          max={5.5}
-          step={0.1}
-          display={`${formatValue(config.wingBeatFrequency, 1)}Hz`}
-          onChange={(value) => onConfigChange("wingBeatFrequency", value)}
-        />
-        <Parameter
-          label="蝴蝶范围"
-          value={config.butterflySpread}
-          min={0.55}
-          max={1.65}
-          step={0.05}
-          display={`${formatValue(config.butterflySpread, 2)}x`}
-          onChange={(value) => onConfigChange("butterflySpread", value)}
-        />
+      <div className="parameter-sections">
+        <ParameterSection title="文字坍塌" note="缺口传播与下落物理">
+          <div className="parameters-grid">
+            <CollapseModeControl
+              value={config.collapseMode}
+              onChange={(value) => onConfigChange("collapseMode", value)}
+            />
+            <Parameter
+              label="播放速度"
+              value={config.speed}
+              min={0.25}
+              max={1.75}
+              step={0.05}
+              display={`${formatValue(config.speed)}x`}
+              onChange={(value) => onConfigChange("speed", value)}
+            />
+            <Parameter
+              label="重力"
+              value={config.gravity}
+              min={0.35}
+              max={1.8}
+              step={0.05}
+              display={formatValue(config.gravity)}
+              onChange={(value) => onConfigChange("gravity", value)}
+            />
+            <Parameter
+              label="风力"
+              value={config.wind}
+              min={-1.2}
+              max={1.2}
+              step={0.05}
+              display={formatValue(config.wind)}
+              onChange={(value) => onConfigChange("wind", value)}
+            />
+            <Parameter
+              label="中心吸引"
+              value={config.centerAttraction}
+              min={0}
+              max={1.6}
+              step={0.05}
+              display={formatValue(config.centerAttraction)}
+              onChange={(value) => onConfigChange("centerAttraction", value)}
+            />
+            <Parameter
+              label="坍塌时长"
+              value={config.collapseDuration}
+              min={0.7}
+              max={2.4}
+              step={0.05}
+              display={`${formatValue(config.collapseDuration)}s`}
+              onChange={(value) => onConfigChange("collapseDuration", value)}
+            />
+            <Parameter
+              label="变形时长"
+              value={config.morphDuration}
+              min={0.45}
+              max={1.8}
+              step={0.05}
+              display={`${formatValue(config.morphDuration)}s`}
+              onChange={(value) => onConfigChange("morphDuration", value)}
+            />
+            <Parameter
+              label="字符数量"
+              value={config.particleCount}
+              min={120}
+              max={480}
+              step={10}
+              display={String(config.particleCount)}
+              onChange={(value) => onConfigChange("particleCount", value)}
+            />
+          </div>
+        </ParameterSection>
+
+        <ParameterSection title="蝴蝶飞行" note="完成后仍可实时调整">
+          <div className="parameters-grid">
+            <ButterflyDistributionControl
+              value={config.butterflyDistribution}
+              onChange={(value) => onConfigChange("butterflyDistribution", value)}
+            />
+            <Parameter
+              label="扇翅频率"
+              value={config.wingBeatFrequency}
+              min={1.2}
+              max={5.5}
+              step={0.1}
+              display={`${formatValue(config.wingBeatFrequency, 1)}Hz`}
+              onChange={(value) => onConfigChange("wingBeatFrequency", value)}
+            />
+            <Parameter
+              label="横向分布"
+              value={config.butterflyHorizontalSpread}
+              min={0.35}
+              max={1.2}
+              step={0.01}
+              display={`${Math.round(config.butterflyHorizontalSpread * 100)}%`}
+              onChange={(value) => onConfigChange("butterflyHorizontalSpread", value)}
+            />
+            <Parameter
+              label="纵向高度"
+              value={config.butterflyVerticalSpread}
+              min={0.35}
+              max={1.15}
+              step={0.01}
+              display={`${Math.round(config.butterflyVerticalSpread * 100)}%`}
+              onChange={(value) => onConfigChange("butterflyVerticalSpread", value)}
+            />
+            <Parameter
+              label="漫游幅度"
+              value={config.butterflyRoam}
+              min={0.15}
+              max={1.7}
+              step={0.05}
+              display={`${formatValue(config.butterflyRoam)}x`}
+              onChange={(value) => onConfigChange("butterflyRoam", value)}
+            />
+            <Parameter
+              label="聚集度"
+              value={config.butterflyCohesion}
+              min={0}
+              max={1.2}
+              step={0.05}
+              display={formatValue(config.butterflyCohesion)}
+              onChange={(value) => onConfigChange("butterflyCohesion", value)}
+            />
+            <Parameter
+              label="飞行速度"
+              value={config.butterflyFlightSpeed}
+              min={0.35}
+              max={1.8}
+              step={0.05}
+              display={`${formatValue(config.butterflyFlightSpeed)}x`}
+              onChange={(value) => onConfigChange("butterflyFlightSpeed", value)}
+            />
+            <Parameter
+              label="蝴蝶大小"
+              value={config.butterflyScale}
+              min={0.6}
+              max={1.5}
+              step={0.05}
+              display={`${formatValue(config.butterflyScale)}x`}
+              onChange={(value) => onConfigChange("butterflyScale", value)}
+            />
+          </div>
+        </ParameterSection>
       </div>
 
-      <p className="motion-note">蝴蝶会在花丛上方分散盘旋，范围、风力、吸引力和扇翅频率在完成后仍可实时调整。</p>
+      <p className="motion-note">默认蝴蝶均匀分布在花丛上方，也可以实验左右展开、中心扩散和全场漂游。</p>
     </aside>
   );
 }
@@ -211,6 +275,51 @@ function CollapseModeControl({ value, onChange }: CollapseModeControlProps) {
         <option value="wave-collapse">波纹塌落</option>
       </select>
     </label>
+  );
+}
+
+interface ButterflyDistributionControlProps {
+  value: ButterflyDistribution;
+  onChange: (value: ButterflyDistribution) => void;
+}
+
+function ButterflyDistributionControl({ value, onChange }: ButterflyDistributionControlProps) {
+  return (
+    <label className="parameter-control parameter-control-wide">
+      <span className="parameter-topline">
+        <span>分布模式</span>
+        <output>实时</output>
+      </span>
+      <select
+        className="mode-select"
+        value={value}
+        onChange={(event) => onChange(event.target.value as ButterflyDistribution)}
+        aria-label="蝴蝶分布模式"
+      >
+        <option value="canopy">花丛上方均匀</option>
+        <option value="sides">左右两翼展开</option>
+        <option value="center">中心向外扩散</option>
+        <option value="full-field">全场宽幅漂游</option>
+      </select>
+    </label>
+  );
+}
+
+interface ParameterSectionProps {
+  title: string;
+  note: string;
+  children: ReactNode;
+}
+
+function ParameterSection({ title, note, children }: ParameterSectionProps) {
+  return (
+    <section className="parameter-section">
+      <div className="parameter-section-heading">
+        <span>{title}</span>
+        <span>{note}</span>
+      </div>
+      {children}
+    </section>
   );
 }
 

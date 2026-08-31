@@ -8,6 +8,7 @@ export type CollapseMode =
   | "column-collapse"
   | "center-collapse"
   | "wave-collapse";
+export type ButterflyDistribution = "canopy" | "sides" | "center" | "full-field";
 
 export interface PhysicsConfig {
   gravity: number;
@@ -20,7 +21,13 @@ export interface PhysicsConfig {
   particleCount: number;
   speed: number;
   wingBeatFrequency: number;
-  butterflySpread: number;
+  butterflyDistribution: ButterflyDistribution;
+  butterflyHorizontalSpread: number;
+  butterflyVerticalSpread: number;
+  butterflyRoam: number;
+  butterflyCohesion: number;
+  butterflyFlightSpeed: number;
+  butterflyScale: number;
 }
 
 export interface GlyphParticle {
@@ -57,6 +64,7 @@ export interface Butterfly {
   rotation: number;
   rotationSpeed: number;
   scale: number;
+  baseScale: number;
   alpha: number;
   birthTime: number;
   color: string;
@@ -122,5 +130,11 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   particleCount: 420,
   speed: 1,
   wingBeatFrequency: 2.8,
-  butterflySpread: 1,
+  butterflyDistribution: "canopy",
+  butterflyHorizontalSpread: 0.92,
+  butterflyVerticalSpread: 0.78,
+  butterflyRoam: 1,
+  butterflyCohesion: 0.55,
+  butterflyFlightSpeed: 1,
+  butterflyScale: 1,
 };
