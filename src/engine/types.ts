@@ -12,6 +12,7 @@ export interface PhysicsConfig {
   morphDuration: number;
   particleCount: number;
   speed: number;
+  wingBeatFrequency: number;
 }
 
 export interface GlyphParticle {
@@ -27,7 +28,9 @@ export interface GlyphParticle {
   alpha: number;
   stage: Stage;
   releaseAt: number;
+  collapseAt: number;
   morphAt: number;
+  morphThresholdY: number;
   morphProgress: number;
   seed: number;
   sourceLine: number;
@@ -55,6 +58,7 @@ export interface Butterfly {
   orbitRadius: number;
   orbitHeight: number;
   flightPhase: number;
+  wingPhase: number;
   flowerLinked: boolean;
 }
 
@@ -104,4 +108,5 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   morphDuration: 0.72,
   particleCount: 150,
   speed: 1,
+  wingBeatFrequency: 2.8,
 };

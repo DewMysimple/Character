@@ -142,9 +142,18 @@ export function ControlPanel({
           display={String(config.particleCount)}
           onChange={(value) => onConfigChange("particleCount", value)}
         />
+        <Parameter
+          label="扇翅频率"
+          value={config.wingBeatFrequency}
+          min={1.2}
+          max={5.5}
+          step={0.1}
+          display={`${formatValue(config.wingBeatFrequency, 1)}Hz`}
+          onChange={(value) => onConfigChange("wingBeatFrequency", value)}
+        />
       </div>
 
-      <p className="motion-note">花园在 8 秒内完成生长，蝴蝶会持续飞行。</p>
+      <p className="motion-note">文字先在卡片中央塌陷，再掉入花丛附近变成蝴蝶。扇翅频率可实时调节。</p>
     </aside>
   );
 }

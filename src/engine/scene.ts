@@ -43,6 +43,10 @@ const CODE_PALETTE = [
 ];
 
 const FLOWER_PALETTE = ["#bf8d8b", "#9aa89b", "#a8a0b8", "#c8a77f"];
+const COLLAPSE_CENTER_X = DESIGN_WIDTH / 2;
+const COLLAPSE_CENTER_Y = 304;
+const FLOWER_ZONE_MIN_Y = 650;
+const FLOWER_ZONE_MAX_Y = 776;
 
 export const STAGE_LABELS: Record<Stage, string> = {
   intro: "场景准备",
@@ -308,7 +312,7 @@ export const drawButterfly = (
   context.fillStyle = "rgba(252, 249, 238, 0.2)";
   context.lineWidth = 1.05;
 
-  const wingBeat = Math.sin(butterfly.flightPhase * 12) * 0.12;
+  const wingBeat = Math.sin(butterfly.wingPhase) * 0.12;
   const leftWing = 1 + wingBeat;
   const rightWing = 1 - wingBeat;
 
@@ -438,7 +442,6 @@ export class SceneEngine {
   }
 
   private step(delta: number) {
-    const previousTime = this.time;
     this.motionTime += delta;
     this.time = clamp(this.time + delta, 0, SCENE_DURATION);
 
@@ -447,43 +450,91 @@ export class SceneEngine {
         glyph.active = true;
         glyph.x = 54 + 50 + glyph.sourceColumn * 6.35;
         glyph.y = 62 + 42 + glyph.sourceLine * 17;
+        const collapseTargetX =
+          COLLAPSE_CENTER_X + (seededRandom(glyph.seed + 21) - 0.5) * 22;
+        const collapseTargetY =
+          COLLAPSE_CENTER_Y + (seededRandom(glyph.seed + 22) - 0.5) * 14;
+        glyph.vx = (collapseTargetX - glyph.x) * 0.02 + (seededRandom(glyph.seed + 23) - 0.5) * 0.8;
+        glyph.vy = (collapseTargetY - glyph.y) * 0.02 + seededRandom(glyph.seed + 24) * 0.8;
       }
       if (!glyph.active) return;
 
+      const glyphAge = Math.max(0, this.time - glyph.releaseAt);
+      const collapseDuration = glyph.collapseAt - glyph.releaseAt;
+      const inCollapse = glyphAge < collapseDuration;
       const flutter = (seededRandom(glyph.seed + Math.floor(this.time * 18)) - 0.5) * 0.23;
-      const attraction = (DESIGN_WIDTH / 2 - glyph.x) * this.config.centerAttraction * 0.0026;
-      glyph.vx += (this.config.wind * 0.002 + attraction + flutter * 0.006) * delta * 60;
-      glyph.vy += this.config.gravity * 0.09 * delta * 60;
+
+      if (inCollapse) {
+        const collapseTargetX =
+          COLLAPSE_CENTER_X + (seededRandom(glyph.seed + 21) - 0.5) * 22;
+        const collapseTargetY =
+          COLLAPSE_CENTER_Y + (seededRandom(glyph.seed + 22) - 0.5) * 14;
+        const collapseFade = 1 - clamp(glyphAge / collapseDuration, 0, 1);
+        const collapseSpring = 0.0048 + this.config.centerAttraction * 0.0045;
+        const swirl = Math.sin(glyphAge * 15 + glyph.seed) * 0.026 * collapseFade;
+        glyph.vx +=
+          ((collapseTargetX - glyph.x) * collapseSpring + swirl + this.config.wind * 0.00045) *
+          delta *
+          60;
+        glyph.vy +=
+          ((collapseTargetY - glyph.y) * collapseSpring + this.config.gravity * 0.018) *
+          delta *
+          60;
+      } else {
+        const exitProgress = clamp((glyphAge - collapseDuration) / 0.5, 0, 1);
+        const centerPull =
+          (COLLAPSE_CENTER_X - glyph.x) * this.config.centerAttraction * 0.0032;
+        const dropAcceleration = this.config.gravity * (0.12 + exitProgress * 0.055);
+        const turbulence = Math.sin(glyphAge * 9 + glyph.seed) * 0.02;
+        glyph.vx +=
+          (this.config.wind * 0.002 + centerPull + flutter * 0.014 + turbulence) * delta * 60;
+        glyph.vy +=
+          (dropAcceleration + Math.cos(glyphAge * 7 + glyph.seed) * 0.022) * delta * 60;
+      }
       glyph.vx *= this.config.drag;
       glyph.vy *= this.config.drag;
+      const glyphSpeed = Math.hypot(glyph.vx, glyph.vy);
+      if (glyphSpeed > 18) {
+        glyph.vx = (glyph.vx / glyphSpeed) * 18;
+        glyph.vy = (glyph.vy / glyphSpeed) * 18;
+      }
       glyph.x += glyph.vx * delta * 60;
       glyph.y += glyph.vy * delta * 60;
       glyph.rotation += glyph.rotationSpeed * delta * 60;
 
-      if (this.time >= glyph.morphAt) {
+      const enoughDropTime = glyphAge >= 1.05;
+      const reachedFlowerZone = glyph.y >= glyph.morphThresholdY;
+      const safeFallback = this.time >= glyph.morphAt;
+      if (glyph.stage !== "morphing" && enoughDropTime && (reachedFlowerZone || safeFallback)) {
         glyph.stage = "morphing";
+        glyph.morphAt = this.time;
+        glyph.morphProgress = 0;
+        this.spawnButterfly(glyph);
+      }
+
+      if (glyph.stage === "morphing") {
         glyph.morphProgress = clamp(
           (this.time - glyph.morphAt) / this.config.morphDuration,
           0,
           1,
         );
         glyph.alpha = 1 - easeInOut(glyph.morphProgress);
-        if (previousTime < glyph.morphAt) this.spawnButterfly(glyph);
       } else {
         glyph.stage = "falling";
-        glyph.alpha = 0.92;
+        glyph.alpha = 0.96;
       }
     });
 
     this.butterflies.forEach((butterfly) => {
       const age = Math.max(0, this.motionTime - butterfly.birthTime);
       butterfly.flightPhase += delta * 7.2;
+      butterfly.wingPhase += delta * this.config.wingBeatFrequency * Math.PI * 2;
       const orbitX = butterfly.targetX + Math.sin(age * 1.18 + butterfly.flightPhase) * butterfly.orbitRadius;
       const orbitY = butterfly.targetY + Math.cos(age * 1.42 + butterfly.flightPhase) * butterfly.orbitHeight;
       const distanceX = orbitX - butterfly.x;
       const distanceY = orbitY - butterfly.y;
       const drift = Math.cos(age * 2.7 + butterfly.seed) * 0.018;
-      const steering = 0.00042;
+      const steering = 0.00105;
       butterfly.vx += (distanceX * steering + drift + this.config.wind * 0.0012) * delta * 60;
       butterfly.vy += (distanceY * steering + Math.sin(age * 2.2 + butterfly.seed) * 0.014) * delta * 60;
       butterfly.vx *= 0.982;
@@ -498,7 +549,7 @@ export class SceneEngine {
       butterfly.rotation += butterfly.rotationSpeed * delta * 60 + butterfly.vx * 0.0006;
       butterfly.alpha = 0.9 * easeOutCubic(clamp(age / 0.34, 0, 1));
 
-      if (!butterfly.flowerLinked && Math.hypot(distanceX, distanceY) < 54) {
+      if (!butterfly.flowerLinked && Math.hypot(distanceX, distanceY) < 64) {
         butterfly.flowerLinked = true;
         this.activateFlower(
           butterfly.targetFlowerId,
@@ -530,7 +581,11 @@ export class SceneEngine {
       const source = PARTICLE_POSITIONS[
         Math.min(PARTICLE_POSITIONS.length - 1, Math.floor((index * PARTICLE_POSITIONS.length) / count))
       ];
-      const releaseAt = 1.28 + (index / Math.max(1, count - 1)) * 1.7 + seededRandom(seed) * 0.1;
+      const sourceX = 54 + 50 + source.sourceColumn * 6.35;
+      const sourceY = 62 + 42 + source.sourceLine * 17;
+      const collapseDistance = Math.hypot(sourceX - COLLAPSE_CENTER_X, sourceY - COLLAPSE_CENTER_Y);
+      const collapseOrder = clamp(collapseDistance / 300, 0, 1);
+      const releaseAt = 1.12 + collapseOrder * 1.42 + seededRandom(seed) * 0.08;
       this.glyphs.push({
         id: index,
         char: source.char,
@@ -544,7 +599,10 @@ export class SceneEngine {
         alpha: 0,
         stage: "intro",
         releaseAt,
-        morphAt: releaseAt + 0.72 + seededRandom(seed + 6) * 0.3,
+        collapseAt: releaseAt + 0.38 + seededRandom(seed + 6) * 0.14,
+        morphAt: releaseAt + 2.45 + seededRandom(seed + 7) * 0.3,
+        morphThresholdY:
+          FLOWER_ZONE_MIN_Y + seededRandom(seed + 8) * (FLOWER_ZONE_MAX_Y - FLOWER_ZONE_MIN_Y),
         morphProgress: 0,
         seed,
         sourceLine: source.sourceLine,
@@ -619,6 +677,7 @@ export class SceneEngine {
       orbitRadius: 18 + seededRandom(glyph.seed + 15) * 24,
       orbitHeight: 10 + seededRandom(glyph.seed + 16) * 18,
       flightPhase: seededRandom(glyph.seed + 17) * Math.PI * 2,
+      wingPhase: seededRandom(glyph.seed + 18) * Math.PI * 2,
       flowerLinked: false,
     });
   }
