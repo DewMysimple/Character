@@ -530,7 +530,7 @@ export class SceneEngine {
         glyph.vx =
           this.config.collapseMode === "column-collapse"
             ? (seededRandom(this.seed + glyph.sourceColumn * 2.61 + 41) - 0.5) * 0.035
-            : (seededRandom(glyph.seed + 23) - 0.5) * 0.12;
+            : (seededRandom(glyph.seed + 23) - 0.5) * 0.28;
         glyph.vy =
           this.config.collapseMode === "column-collapse"
             ? 0.012 + seededRandom(this.seed + glyph.sourceColumn * 3.17 + 91) * 0.025
@@ -715,9 +715,7 @@ export class SceneEngine {
   }
 
   private getStage(): Stage {
-    const releaseJitterWindow = this.config.collapseMode === "column-collapse" ? 0 : 0.24;
-    const collapseEnd =
-      COLLAPSE_START_TIME + this.getCollapseReleaseSpan() + releaseJitterWindow;
+    const collapseEnd = COLLAPSE_START_TIME + this.getCollapseReleaseSpan();
     const morphEnd = Math.min(SCENE_DURATION - 1.1, collapseEnd + 1.5);
     if (this.time < COLLAPSE_START_TIME) return "intro";
     if (this.time < collapseEnd) return "falling";
@@ -741,16 +739,12 @@ export class SceneEngine {
       const sourcePlan = sources[index];
       const source = sourcePlan.source;
       const collapseOrder = this.getCollapseOrder(source, this.config.collapseMode);
-      const releaseJitter =
-        this.config.collapseMode === "column-collapse"
-          ? 0
-          : seededRandom(seed + 29) * 0.24;
+      const releaseOrder = sourcePlan.collapsible
+        ? this.getIndependentReleaseOrder(collapseOrder, seed, this.config.collapseMode)
+        : collapseOrder;
       const releaseSpan = this.getCollapseReleaseSpan();
       const releaseAt = sourcePlan.collapsible
-        ? Math.max(
-            COLLAPSE_START_TIME,
-            COLLAPSE_START_TIME + collapseOrder * releaseSpan + releaseJitter,
-          )
+        ? COLLAPSE_START_TIME + releaseOrder * releaseSpan
         : Number.POSITIVE_INFINITY;
       this.glyphs.push({
         id: index,
@@ -828,6 +822,17 @@ export class SceneEngine {
       0,
       1,
     );
+  }
+
+  private getIndependentReleaseOrder(collapseOrder: number, seed: number, mode: CollapseMode) {
+    if (mode === "column-collapse") return collapseOrder;
+
+    // Spatial propagation gives the collapse its local breach. A second,
+    // character-specific component prevents equal-distance glyphs from
+    // releasing as a visible row or a three-character batch.
+    const characterNoise = seededRandom(seed + 29);
+    const noiseWeight = mode === "local-collapse" ? 0.34 : 0.22;
+    return clamp(collapseOrder * (1 - noiseWeight) + characterNoise * noiseWeight, 0, 1);
   }
 
   private getParticleSources(count: number, mode: CollapseMode): ParticleSourcePlan[] {
