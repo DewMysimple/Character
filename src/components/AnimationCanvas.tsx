@@ -3,7 +3,6 @@ import { SceneEngine } from "../engine/scene";
 import {
   DESIGN_HEIGHT,
   DESIGN_WIDTH,
-  SCENE_DURATION,
   type PhysicsConfig,
   type SceneSnapshot,
 } from "../engine/types";
@@ -18,7 +17,6 @@ interface AnimationCanvasProps {
   playing: boolean;
   replayToken: number;
   seekRequest: SeekRequest | null;
-  reducedMotion: boolean;
   onSnapshot: (snapshot: SceneSnapshot) => void;
 }
 
@@ -36,7 +34,6 @@ export function AnimationCanvas({
   playing,
   replayToken,
   seekRequest,
-  reducedMotion,
   onSnapshot,
 }: AnimationCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -44,7 +41,6 @@ export function AnimationCanvas({
   const engineRef = useRef<SceneEngine | null>(null);
   const configRef = useRef(config);
   const playingRef = useRef(playing);
-  const reducedMotionRef = useRef(reducedMotion);
   const lastReplayTokenRef = useRef(replayToken);
   const lastSeekTokenRef = useRef(seekRequest?.token ?? 0);
 
@@ -58,22 +54,10 @@ export function AnimationCanvas({
   }, [playing]);
 
   useEffect(() => {
-    reducedMotionRef.current = reducedMotion;
-    if (reducedMotion) {
-      engineRef.current?.seek(SCENE_DURATION);
-      playingRef.current = false;
-      if (engineRef.current) onSnapshot(engineRef.current.getSnapshot());
-    }
-  }, [onSnapshot, reducedMotion]);
-
-  useEffect(() => {
     if (!engineRef.current || replayToken === lastReplayTokenRef.current) return;
     lastReplayTokenRef.current = replayToken;
     engineRef.current.reset();
-    if (reducedMotionRef.current) {
-      engineRef.current.seek(SCENE_DURATION);
-      onSnapshot(engineRef.current.getSnapshot());
-    }
+    onSnapshot(engineRef.current.getSnapshot());
   }, [onSnapshot, replayToken]);
 
   useEffect(() => {
@@ -94,7 +78,6 @@ export function AnimationCanvas({
 
     const engine = new SceneEngine(configRef.current);
     engineRef.current = engine;
-    if (reducedMotionRef.current) engine.seek(SCENE_DURATION);
 
     let dpr = Math.min(window.devicePixelRatio || 1, 2);
     let viewportWidth = 0;
@@ -122,7 +105,7 @@ export function AnimationCanvas({
     const draw = (now: number) => {
       const delta = Math.min((now - lastFrame) / 1000, 0.05);
       lastFrame = now;
-      if (playingRef.current && !reducedMotionRef.current) engine.advance(delta);
+      if (playingRef.current) engine.advance(delta);
 
       const viewport = fitStage(viewportWidth, viewportHeight);
       context.setTransform(dpr, 0, 0, dpr, 0, 0);

@@ -27,6 +27,12 @@ const CODE_LINES = [
   "return update;",
 ];
 
+const CODE_POSITIONS = CODE_LINES.flatMap((line, lineIndex) =>
+  [...line].map((char, sourceColumn) => ({ char, sourceLine: lineIndex, sourceColumn })),
+);
+
+const PARTICLE_POSITIONS = CODE_POSITIONS.filter(({ char }) => char.trim().length > 0);
+
 const CODE_PALETTE = [
   "#6f91c4",
   "#bf6f5f",
@@ -37,9 +43,6 @@ const CODE_PALETTE = [
 ];
 
 const FLOWER_PALETTE = ["#bf8d8b", "#9aa89b", "#a8a0b8", "#c8a77f"];
-
-const GLYPH_SOURCE =
-  "const snapshot = this.undoHistory.pop(); if (!snapshot) return false; this.redoHistoryStack.push(this.captureSnapshot()); this.applySnapshotToBuffer(snapshot); this.emit('history:undo', snapshot); renderVisibleRows(firstRow, rowCount); return this.textLinesByRow.slice(firstRow, firstRow + rowCount); // ReactiveDocumentStore keeps a small bus for each edit. ";
 
 export const STAGE_LABELS: Record<Stage, string> = {
   intro: "场景准备",
@@ -86,7 +89,11 @@ const roundedRect = (
   context.closePath();
 };
 
-const drawCodeCard = (context: CanvasRenderingContext2D, time: number) => {
+const drawCodeCard = (
+  context: CanvasRenderingContext2D,
+  time: number,
+  glyphs: GlyphParticle[],
+) => {
   const cardX = 54;
   const cardY = 62;
   const cardWidth = 612;
@@ -120,6 +127,11 @@ const drawCodeCard = (context: CanvasRenderingContext2D, time: number) => {
 
   context.font = "10px 'SFMono-Regular', Consolas, monospace";
   context.textBaseline = "middle";
+  const missingGlyphs = new Set(
+    glyphs
+      .filter((glyph) => glyph.active)
+      .map((glyph) => `${glyph.sourceLine}:${glyph.sourceColumn}`),
+  );
   CODE_LINES.forEach((line, lineIndex) => {
     const y = cardY + 42 + lineIndex * 17;
     context.fillStyle = "rgba(128, 120, 109, 0.56)";
@@ -130,6 +142,7 @@ const drawCodeCard = (context: CanvasRenderingContext2D, time: number) => {
     const reveal = clamp((time - 0.2) / 0.9, 0, 1);
     const visibleLength = Math.ceil(line.length * reveal);
     [...line.slice(0, visibleLength)].forEach((character, characterIndex) => {
+      if (missingGlyphs.has(`${lineIndex}:${characterIndex}`)) return;
       const color = CODE_PALETTE[(lineIndex * 7 + characterIndex) % CODE_PALETTE.length];
       context.fillStyle = character === " " ? "rgba(70, 68, 63, 0.52)" : color;
       context.fillText(character, cardX + 50 + characterIndex * 6.35, y);
@@ -203,14 +216,16 @@ const drawStem = (
 };
 
 const drawFlower = (context: CanvasRenderingContext2D, flower: Flower) => {
-  if (!flower.activated || flower.petalProgress <= 0) return;
+  if (!flower.activated || flower.stemProgress <= 0) return;
 
-  const progress = easeOutCubic(flower.petalProgress);
-  const tipX = flower.x + flower.sway * Math.sin(progress * Math.PI);
+  const stemProgress = easeOutCubic(flower.stemProgress);
+  const leafProgress = easeOutCubic(flower.leafProgress);
+  const petalProgress = easeOutCubic(flower.petalProgress);
+  const tipX = flower.x + flower.sway * Math.sin(stemProgress * Math.PI);
   const tipY = flower.groundY - flower.height * easeOutCubic(flower.stemProgress);
 
   context.save();
-  context.globalAlpha = 0.74 * progress;
+  context.globalAlpha = 0.74 * stemProgress;
   context.strokeStyle = "rgba(111, 123, 107, 0.74)";
   context.lineWidth = 1.1;
   context.beginPath();
@@ -223,25 +238,59 @@ const drawFlower = (context: CanvasRenderingContext2D, flower: Flower) => {
   );
   context.stroke();
 
+  if (leafProgress > 0) {
+    const leafY = flower.groundY - flower.height * 0.48;
+    const leafX = flower.x + flower.sway * 0.54;
+    context.fillStyle = "rgba(144, 157, 142, 0.58)";
+    context.beginPath();
+    context.ellipse(
+      leafX - 9,
+      leafY - 8 * leafProgress,
+      12 * leafProgress,
+      4.8 * leafProgress,
+      -0.36,
+      0,
+      Math.PI * 2,
+    );
+    context.fill();
+    context.beginPath();
+    context.ellipse(
+      leafX + 9,
+      leafY - 32 * leafProgress,
+      11 * leafProgress,
+      4.4 * leafProgress,
+      0.36,
+      0,
+      Math.PI * 2,
+    );
+    context.fill();
+  }
+
+  if (petalProgress <= 0) {
+    context.restore();
+    return;
+  }
+
   const petalCount = 5;
-  const petalLength = 12 * progress;
+  const petalLength = 12 * petalProgress;
   for (let index = 0; index < petalCount; index += 1) {
     const angle = (Math.PI * 2 * index) / petalCount - Math.PI / 2;
     context.save();
     context.translate(tipX, tipY);
     context.rotate(angle);
+    context.globalAlpha = 0.74 * petalProgress;
     context.fillStyle = flower.color;
     context.strokeStyle = "rgba(104, 99, 92, 0.35)";
     context.lineWidth = 0.65;
     context.beginPath();
-    context.ellipse(0, -petalLength * 0.7, 4.5 * progress, petalLength, 0, 0, Math.PI * 2);
+    context.ellipse(0, -petalLength * 0.7, 4.5 * petalProgress, petalLength, 0, 0, Math.PI * 2);
     context.fill();
     context.stroke();
     context.restore();
   }
   context.fillStyle = "rgba(164, 133, 96, 0.78)";
   context.beginPath();
-  context.arc(tipX, tipY, 2.1 * progress, 0, Math.PI * 2);
+  context.arc(tipX, tipY, 2.1 * petalProgress, 0, Math.PI * 2);
   context.fill();
   context.restore();
 };
@@ -259,7 +308,7 @@ export const drawButterfly = (
   context.fillStyle = "rgba(252, 249, 238, 0.2)";
   context.lineWidth = 1.05;
 
-  const wingBeat = Math.sin(butterfly.birthTime * 18 + butterfly.seed) * 0.12;
+  const wingBeat = Math.sin(butterfly.flightPhase * 12) * 0.12;
   const leftWing = 1 + wingBeat;
   const rightWing = 1 - wingBeat;
 
@@ -295,6 +344,7 @@ export const drawButterfly = (
 export class SceneEngine {
   private config: PhysicsConfig;
   private time = 0;
+  private motionTime = 0;
   private seed: number;
   private glyphs: GlyphParticle[] = [];
   private butterflies: Butterfly[] = [];
@@ -325,6 +375,7 @@ export class SceneEngine {
   reset(seed = this.seed) {
     this.seed = seed;
     this.time = 0;
+    this.motionTime = 0;
     this.glyphs = [];
     this.butterflies = [];
     this.flowers = [];
@@ -350,8 +401,8 @@ export class SceneEngine {
   }
 
   advance(realDelta: number) {
-    if (this.time >= SCENE_DURATION) return;
     const delta = clamp(realDelta, 0, 0.05) * this.config.speed;
+    if (delta <= 0) return;
     this.step(delta);
   }
 
@@ -378,7 +429,7 @@ export class SceneEngine {
     context.fillRect(0, 0, width, height);
 
     this.drawTexture(context, width, height);
-    drawCodeCard(context, this.time);
+    drawCodeCard(context, this.time, this.glyphs);
     drawTitle(context, this.time);
     this.stems.forEach((stem) => drawStem(context, stem, this.time));
     this.flowers.forEach((flower) => drawFlower(context, flower));
@@ -388,17 +439,17 @@ export class SceneEngine {
 
   private step(delta: number) {
     const previousTime = this.time;
+    this.motionTime += delta;
     this.time = clamp(this.time + delta, 0, SCENE_DURATION);
 
     this.glyphs.forEach((glyph) => {
       if (!glyph.active && this.time >= glyph.releaseAt) {
         glyph.active = true;
-        glyph.x = DESIGN_WIDTH / 2 + (seededRandom(glyph.seed) - 0.5) * 92;
-        glyph.y = 314 + seededRandom(glyph.seed + 3) * 14;
+        glyph.x = 54 + 50 + glyph.sourceColumn * 6.35;
+        glyph.y = 62 + 42 + glyph.sourceLine * 17;
       }
       if (!glyph.active) return;
 
-      const phaseTime = Math.max(0, this.time - glyph.releaseAt);
       const flutter = (seededRandom(glyph.seed + Math.floor(this.time * 18)) - 0.5) * 0.23;
       const attraction = (DESIGN_WIDTH / 2 - glyph.x) * this.config.centerAttraction * 0.0026;
       glyph.vx += (this.config.wind * 0.002 + attraction + flutter * 0.006) * delta * 60;
@@ -425,37 +476,50 @@ export class SceneEngine {
     });
 
     this.butterflies.forEach((butterfly) => {
-      const age = Math.max(0, this.time - butterfly.birthTime);
-      const flutter = Math.sin(age * 8 + butterfly.seed) * 0.005;
-      const drift = Math.cos(age * 2.7 + butterfly.seed) * 0.014;
-      butterfly.vx += drift * delta * 60;
-      butterfly.vy += flutter * delta * 60 - 0.004 * delta * 60;
-      butterfly.vx *= 0.997;
-      butterfly.vy *= 0.996;
+      const age = Math.max(0, this.motionTime - butterfly.birthTime);
+      butterfly.flightPhase += delta * 7.2;
+      const orbitX = butterfly.targetX + Math.sin(age * 1.18 + butterfly.flightPhase) * butterfly.orbitRadius;
+      const orbitY = butterfly.targetY + Math.cos(age * 1.42 + butterfly.flightPhase) * butterfly.orbitHeight;
+      const distanceX = orbitX - butterfly.x;
+      const distanceY = orbitY - butterfly.y;
+      const drift = Math.cos(age * 2.7 + butterfly.seed) * 0.018;
+      const steering = 0.00042;
+      butterfly.vx += (distanceX * steering + drift + this.config.wind * 0.0012) * delta * 60;
+      butterfly.vy += (distanceY * steering + Math.sin(age * 2.2 + butterfly.seed) * 0.014) * delta * 60;
+      butterfly.vx *= 0.982;
+      butterfly.vy *= 0.982;
+      const flightSpeed = Math.hypot(butterfly.vx, butterfly.vy);
+      if (flightSpeed > 6.4) {
+        butterfly.vx = (butterfly.vx / flightSpeed) * 6.4;
+        butterfly.vy = (butterfly.vy / flightSpeed) * 6.4;
+      }
       butterfly.x += butterfly.vx * delta * 60;
       butterfly.y += butterfly.vy * delta * 60;
-      butterfly.rotation += butterfly.rotationSpeed * delta * 60;
-      butterfly.alpha = clamp(0.9 - Math.max(0, age - 2.1) * 0.16, 0, 0.9);
+      butterfly.rotation += butterfly.rotationSpeed * delta * 60 + butterfly.vx * 0.0006;
+      butterfly.alpha = 0.9 * easeOutCubic(clamp(age / 0.34, 0, 1));
 
-      if (!butterfly.flowerLinked && (butterfly.y > 790 || age > 0.74)) {
+      if (!butterfly.flowerLinked && Math.hypot(distanceX, distanceY) < 54) {
         butterfly.flowerLinked = true;
-        this.activateNextFlower(this.time + 0.24 + seededRandom(butterfly.seed) * 0.36);
+        this.activateFlower(
+          butterfly.targetFlowerId,
+          this.time + 0.1 + seededRandom(butterfly.seed) * 0.15,
+        );
       }
     });
 
     this.flowers.forEach((flower) => {
       if (!flower.activated || this.time < flower.triggerAt) return;
       const age = this.time - flower.triggerAt;
-      flower.stemProgress = clamp(age / 0.85, 0, 1);
-      flower.leafProgress = clamp((age - 0.22) / 0.56, 0, 1);
-      flower.petalProgress = clamp((age - 0.55) / 0.5, 0, 1);
+      flower.stemProgress = clamp(age / 1.6, 0, 1);
+      flower.leafProgress = clamp((age - 0.42) / 1.35, 0, 1);
+      flower.petalProgress = clamp((age - 0.92) / 1.08, 0, 1);
     });
   }
 
   private getStage(): Stage {
     if (this.time < 1.4) return "intro";
-    if (this.time < 2.8) return "falling";
-    if (this.time < 3.8) return "morphing";
+    if (this.time < 3.35) return "falling";
+    if (this.time < 5.2) return "morphing";
     return "bloom";
   }
 
@@ -463,11 +527,13 @@ export class SceneEngine {
     const count = Math.round(this.config.particleCount);
     for (let index = 0; index < count; index += 1) {
       const seed = this.seed + index * 17.31;
-      const character = GLYPH_SOURCE[index % GLYPH_SOURCE.length];
-      const releaseAt = 1.32 + (index / Math.max(1, count - 1)) * 1.18 + seededRandom(seed) * 0.08;
+      const source = PARTICLE_POSITIONS[
+        Math.min(PARTICLE_POSITIONS.length - 1, Math.floor((index * PARTICLE_POSITIONS.length) / count))
+      ];
+      const releaseAt = 1.28 + (index / Math.max(1, count - 1)) * 1.7 + seededRandom(seed) * 0.1;
       this.glyphs.push({
         id: index,
-        char: character,
+        char: source.char,
         x: DESIGN_WIDTH / 2,
         y: 314,
         vx: (seededRandom(seed + 1) - 0.5) * 0.9,
@@ -478,9 +544,11 @@ export class SceneEngine {
         alpha: 0,
         stage: "intro",
         releaseAt,
-        morphAt: releaseAt + 1.02 + seededRandom(seed + 6) * 0.28,
+        morphAt: releaseAt + 0.72 + seededRandom(seed + 6) * 0.3,
         morphProgress: 0,
         seed,
+        sourceLine: source.sourceLine,
+        sourceColumn: source.sourceColumn,
         active: false,
         flowerLinked: false,
       });
@@ -525,28 +593,48 @@ export class SceneEngine {
 
   private spawnButterfly(glyph: GlyphParticle) {
     const id = this.butterflies.length;
+    const targetFlowerId = id % this.flowers.length;
+    const targetFlower = this.flowers[targetFlowerId];
+    const targetX =
+      targetFlower.x + targetFlower.sway * 0.45 + (seededRandom(glyph.seed + 13) - 0.5) * 24;
+    const targetY =
+      targetFlower.groundY -
+      targetFlower.height * (0.68 + seededRandom(glyph.seed + 14) * 0.12);
     this.butterflies.push({
       id,
       x: glyph.x,
       y: glyph.y,
       vx: glyph.vx * 0.45 + (seededRandom(glyph.seed + 9) - 0.5) * 1.2,
-      vy: glyph.vy * 0.08 - 0.18 - seededRandom(glyph.seed + 10) * 0.15,
+      vy: glyph.vy * 0.08 + seededRandom(glyph.seed + 10) * 0.18,
       rotation: glyph.rotation,
       rotationSpeed: (seededRandom(glyph.seed + 11) - 0.5) * 0.032,
       scale: 0.43 + seededRandom(glyph.seed + 12) * 0.36,
       alpha: 0,
-      birthTime: this.time,
+      birthTime: this.motionTime,
       color: glyph.color,
       seed: glyph.seed,
+      targetFlowerId,
+      targetX,
+      targetY,
+      orbitRadius: 18 + seededRandom(glyph.seed + 15) * 24,
+      orbitHeight: 10 + seededRandom(glyph.seed + 16) * 18,
+      flightPhase: seededRandom(glyph.seed + 17) * Math.PI * 2,
       flowerLinked: false,
     });
   }
 
-  private activateNextFlower(triggerAt: number) {
-    const nextFlower = this.flowers.find((flower) => !flower.activated);
-    if (!nextFlower) return;
-    nextFlower.activated = true;
-    nextFlower.triggerAt = triggerAt;
+  private activateFlower(flowerId: number, earliestTriggerAt: number) {
+    const flower = this.flowers[flowerId];
+    if (!flower || flower.activated) return;
+
+    const flowerRatio = flower.id / Math.max(1, this.flowers.length - 1);
+    const scheduledTriggerAt = 3.2 + flowerRatio * 2.6;
+    const latestSafeTriggerAt = SCENE_DURATION - 2.08;
+    flower.activated = true;
+    flower.triggerAt = Math.min(
+      latestSafeTriggerAt,
+      Math.max(earliestTriggerAt, scheduledTriggerAt),
+    );
   }
 
   private renderGlyphs(context: CanvasRenderingContext2D) {

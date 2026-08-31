@@ -1,4 +1,4 @@
-export const SCENE_DURATION = 5;
+export const SCENE_DURATION = 8;
 export const DESIGN_WIDTH = 720;
 export const DESIGN_HEIGHT = 960;
 
@@ -30,6 +30,8 @@ export interface GlyphParticle {
   morphAt: number;
   morphProgress: number;
   seed: number;
+  sourceLine: number;
+  sourceColumn: number;
   active: boolean;
   flowerLinked: boolean;
 }
@@ -47,6 +49,12 @@ export interface Butterfly {
   birthTime: number;
   color: string;
   seed: number;
+  targetFlowerId: number;
+  targetX: number;
+  targetY: number;
+  orbitRadius: number;
+  orbitHeight: number;
+  flightPhase: number;
   flowerLinked: boolean;
 }
 
@@ -93,7 +101,7 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   wind: 0.24,
   centerAttraction: 0.58,
   drag: 0.988,
-  morphDuration: 0.52,
+  morphDuration: 0.72,
   particleCount: 150,
   speed: 1,
 };

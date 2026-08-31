@@ -5,7 +5,6 @@ interface ControlPanelProps {
   config: PhysicsConfig;
   playing: boolean;
   snapshot: SceneSnapshot;
-  reducedMotion: boolean;
   onToggle: () => void;
   onReplay: () => void;
   onSeek: (time: number) => void;
@@ -18,19 +17,16 @@ export function ControlPanel({
   config,
   playing,
   snapshot,
-  reducedMotion,
   onToggle,
   onReplay,
   onSeek,
   onConfigChange,
 }: ControlPanelProps) {
-  const isComplete = snapshot.complete;
-
   return (
     <aside className="control-panel" aria-label="动画控制台">
       <div className="panel-heading">
         <div>
-          <p className="panel-kicker">OBJECT STUDY / 05 SEC</p>
+          <p className="panel-kicker">OBJECT STUDY / 08 SEC</p>
           <h1>字符物理实验</h1>
         </div>
         <span className={`stage-mark ${playing ? "is-live" : ""}`} aria-label={playing ? "正在播放" : "已暂停"} />
@@ -44,14 +40,14 @@ export function ControlPanel({
         <div className="timeline-labels">
           <span>{STAGE_LABELS[snapshot.stage]}</span>
           <span className="time-value">
-            {formatValue(snapshot.time, 2)} / 5.00s
+            {formatValue(snapshot.time, 2)} / 8.00s
           </span>
         </div>
         <input
           className="timeline-range"
           type="range"
           min="0"
-          max="5"
+          max="8"
           step="0.01"
           value={snapshot.time}
           onChange={(event) => onSeek(Number(event.target.value))}
@@ -61,7 +57,7 @@ export function ControlPanel({
 
       <div className="transport-row">
         <button className="button button-primary" type="button" onClick={onToggle}>
-          {isComplete ? "再看一次" : playing ? "暂停" : "播放"}
+          {playing ? "暂停" : "播放"}
         </button>
         <button className="button button-quiet" type="button" onClick={onReplay}>
           重播
@@ -148,11 +144,7 @@ export function ControlPanel({
         />
       </div>
 
-      {reducedMotion ? (
-        <p className="motion-note">系统已开启减少动态效果，当前显示最终构图。</p>
-      ) : (
-        <p className="motion-note">每次重播使用同一组随机种子，方便观察参数变化。</p>
-      )}
+      <p className="motion-note">花园在 8 秒内完成生长，蝴蝶会持续飞行。</p>
     </aside>
   );
 }

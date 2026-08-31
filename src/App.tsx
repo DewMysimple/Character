@@ -12,49 +12,25 @@ const INITIAL_SNAPSHOT: SceneSnapshot = {
   complete: false,
 };
 
-function usePrefersReducedMotion() {
-  const [reducedMotion, setReducedMotion] = useState(false);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const handleChange = () => setReducedMotion(mediaQuery.matches);
-    handleChange();
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
-  }, []);
-
-  return reducedMotion;
-}
-
 export default function App() {
-  const reducedMotion = usePrefersReducedMotion();
   const [config, setConfig] = useState<PhysicsConfig>(DEFAULT_PHYSICS);
   const [playing, setPlaying] = useState(true);
   const [snapshot, setSnapshot] = useState<SceneSnapshot>(INITIAL_SNAPSHOT);
   const [replayToken, setReplayToken] = useState(0);
   const [seekRequest, setSeekRequest] = useState<{ token: number; time: number } | null>(null);
 
-  useEffect(() => {
-    if (reducedMotion) setPlaying(false);
-  }, [reducedMotion]);
-
   const handleSnapshot = useCallback((nextSnapshot: SceneSnapshot) => {
     setSnapshot(nextSnapshot);
-    if (nextSnapshot.complete) setPlaying(false);
   }, []);
 
   const handleToggle = () => {
-    if (snapshot.complete) {
-      handleReplay();
-      return;
-    }
     setPlaying((current) => !current);
   };
 
   const handleReplay = () => {
     setReplayToken((token) => token + 1);
     setSnapshot(INITIAL_SNAPSHOT);
-    setPlaying(!reducedMotion);
+    setPlaying(true);
   };
 
   const handleSeek = (time: number) => {
@@ -91,7 +67,6 @@ export default function App() {
         playing={playing}
         replayToken={replayToken}
         seekRequest={seekRequest}
-        reducedMotion={reducedMotion}
         onSnapshot={handleSnapshot}
       />
 
@@ -105,7 +80,6 @@ export default function App() {
         config={config}
         playing={playing}
         snapshot={snapshot}
-        reducedMotion={reducedMotion}
         onToggle={handleToggle}
         onReplay={handleReplay}
         onSeek={handleSeek}
