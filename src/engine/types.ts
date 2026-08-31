@@ -8,7 +8,12 @@ export type CollapseMode =
   | "column-collapse"
   | "center-collapse"
   | "wave-collapse";
-export type ButterflyDistribution = "canopy" | "sides" | "center" | "full-field";
+export type ButterflyDistribution =
+  | "canopy"
+  | "sides"
+  | "center"
+  | "full-field"
+  | "flower-orbit";
 
 export interface PhysicsConfig {
   gravity: number;

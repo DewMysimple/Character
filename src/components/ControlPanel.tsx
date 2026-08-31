@@ -246,7 +246,7 @@ export function ControlPanel({
         </ParameterSection>
       </div>
 
-      <p className="motion-note">默认蝴蝶均匀分布在花丛上方，也可以实验左右展开、中心扩散和全场漂游。</p>
+      <p className="motion-note">默认蝴蝶均匀分布在花丛上方，也可以实验左右展开、中心扩散、全场漂游或围绕花朵飞行。</p>
     </aside>
   );
 }
@@ -300,6 +300,7 @@ function ButterflyDistributionControl({ value, onChange }: ButterflyDistribution
         <option value="sides">左右两翼展开</option>
         <option value="center">中心向外扩散</option>
         <option value="full-field">全场宽幅漂游</option>
+        <option value="flower-orbit">围绕花朵飞行</option>
       </select>
     </label>
   );

@@ -522,16 +522,27 @@ export class SceneEngine {
       this.updateButterflyFlightTarget(butterfly);
       butterfly.scale = butterfly.baseScale * this.config.butterflyScale;
       const roam = this.config.butterflyRoam;
-      const wideDriftX = Math.sin(age * 0.42 + butterfly.seed) * 42 * roam;
-      const wideDriftY = Math.cos(age * 0.36 + butterfly.seed * 0.7) * 38 * roam;
+      const flowerOrbit = this.config.butterflyDistribution === "flower-orbit";
+      const orbitCenterX = butterfly.targetX;
+      const orbitCenterY = butterfly.targetY;
+      const wideDriftX =
+        Math.sin(age * 0.42 + butterfly.seed) * (flowerOrbit ? 12 : 42) * roam;
+      const wideDriftY =
+        Math.cos(age * 0.36 + butterfly.seed * 0.7) * (flowerOrbit ? 10 : 38) * roam;
+      const orbitSpreadX = flowerOrbit
+        ? 0.72 + this.config.butterflyHorizontalSpread * 0.45
+        : roam;
+      const orbitSpreadY = flowerOrbit
+        ? 0.72 + this.config.butterflyVerticalSpread * 0.45
+        : roam;
       const orbitX =
-        butterfly.targetX +
+        orbitCenterX +
         wideDriftX +
-        Math.sin(age * 1.18 + butterfly.flightPhase) * butterfly.orbitRadius * roam;
+        Math.sin(age * 1.18 + butterfly.flightPhase) * butterfly.orbitRadius * orbitSpreadX;
       const orbitY =
-        butterfly.targetY +
+        orbitCenterY +
         wideDriftY +
-        Math.cos(age * 1.42 + butterfly.flightPhase) * butterfly.orbitHeight * roam;
+        Math.cos(age * 1.42 + butterfly.flightPhase) * butterfly.orbitHeight * orbitSpreadY;
       const distanceX = orbitX - butterfly.x;
       const distanceY = orbitY - butterfly.y;
       const drift = Math.cos(age * 2.7 + butterfly.seed) * 0.018;
@@ -694,6 +705,11 @@ export class SceneEngine {
         targetX = centerX + (xSeed * 2 - 1) * 350 * horizontalSpread;
         targetY = 462 + (ySeed * 2 - 1) * 236 * verticalSpread;
         break;
+      case "flower-orbit": {
+        targetX = butterfly.flowerX;
+        targetY = butterfly.flowerY;
+        break;
+      }
       case "canopy":
       default:
         targetX = centerX + (xSeed * 2 - 1) * 316 * horizontalSpread;
@@ -702,7 +718,10 @@ export class SceneEngine {
     }
 
     butterfly.targetX = clamp(targetX, 34, DESIGN_WIDTH - 34);
-    butterfly.targetY = clamp(targetY, BUTTERFLY_ZONE_TOP - 18, BUTTERFLY_ZONE_BOTTOM + 18);
+    const targetBottom = this.config.butterflyDistribution === "flower-orbit"
+      ? DESIGN_HEIGHT - 112
+      : BUTTERFLY_ZONE_BOTTOM + 18;
+    butterfly.targetY = clamp(targetY, BUTTERFLY_ZONE_TOP - 18, targetBottom);
   }
 
   private buildStems() {
