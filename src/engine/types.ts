@@ -8,13 +8,6 @@ export type CollapseMode =
   | "column-collapse"
   | "center-collapse"
   | "wave-collapse";
-export type ButterflyDistribution =
-  | "canopy"
-  | "sides"
-  | "center"
-  | "full-field"
-  | "flower-orbit";
-
 export interface PhysicsConfig {
   gravity: number;
   wind: number;
@@ -26,11 +19,13 @@ export interface PhysicsConfig {
   particleCount: number;
   speed: number;
   wingBeatFrequency: number;
-  butterflyDistribution: ButterflyDistribution;
-  butterflyHorizontalSpread: number;
-  butterflyVerticalSpread: number;
-  butterflyRoam: number;
-  butterflyCohesion: number;
+  butterflyOrbitRadius: number;
+  butterflyOrbitHeight: number;
+  butterflyOrbitSpeed: number;
+  butterflyOrbitTilt: number;
+  butterflyOrbitWobble: number;
+  butterflyOrbitDrift: number;
+  butterflyFlowerAttraction: number;
   butterflyFlightSpeed: number;
   butterflyScale: number;
 }
@@ -135,11 +130,13 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   particleCount: 420,
   speed: 1,
   wingBeatFrequency: 2.8,
-  butterflyDistribution: "canopy",
-  butterflyHorizontalSpread: 0.92,
-  butterflyVerticalSpread: 0.78,
-  butterflyRoam: 1,
-  butterflyCohesion: 0.55,
+  butterflyOrbitRadius: 52,
+  butterflyOrbitHeight: 34,
+  butterflyOrbitSpeed: 1,
+  butterflyOrbitTilt: 0,
+  butterflyOrbitWobble: 0.18,
+  butterflyOrbitDrift: 0.45,
+  butterflyFlowerAttraction: 0.72,
   butterflyFlightSpeed: 1,
   butterflyScale: 1,
 };

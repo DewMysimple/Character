@@ -423,6 +423,30 @@ input[type="range"]:focus-visible {
   outline-offset: 3px;
 }
 
+.mode-lock-value {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 0 12px;
+  color: #4f6054;
+  background: rgba(102, 128, 113, 0.08);
+  border: 1px solid rgba(75, 101, 86, 0.18);
+  border-radius: 10px;
+}
+
+.mode-lock-value strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mode-lock-value span {
+  color: #899189;
+  font-size: 10px;
+  text-align: right;
+}
+
 .motion-note {
   max-width: 48ch;
   margin: 22px 0 0;

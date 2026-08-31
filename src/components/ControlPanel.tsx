@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { STAGE_LABELS } from "../engine/scene";
 import type {
-  ButterflyDistribution,
   CollapseMode,
   PhysicsConfig,
   SceneSnapshot,
@@ -175,10 +174,7 @@ export function ControlPanel({
 
         <ParameterSection title="蝴蝶飞行" note="完成后仍可实时调整">
           <div className="parameters-grid">
-            <ButterflyDistributionControl
-              value={config.butterflyDistribution}
-              onChange={(value) => onConfigChange("butterflyDistribution", value)}
-            />
+            <FlowerOrbitModeControl />
             <Parameter
               label="扇翅频率"
               value={config.wingBeatFrequency}
@@ -189,40 +185,67 @@ export function ControlPanel({
               onChange={(value) => onConfigChange("wingBeatFrequency", value)}
             />
             <Parameter
-              label="横向分布"
-              value={config.butterflyHorizontalSpread}
-              min={0.35}
-              max={1.2}
-              step={0.01}
-              display={`${Math.round(config.butterflyHorizontalSpread * 100)}%`}
-              onChange={(value) => onConfigChange("butterflyHorizontalSpread", value)}
+              label="围绕半径"
+              value={config.butterflyOrbitRadius}
+              min={12}
+              max={120}
+              step={1}
+              display={`${Math.round(config.butterflyOrbitRadius)}px`}
+              onChange={(value) => onConfigChange("butterflyOrbitRadius", value)}
             />
             <Parameter
-              label="纵向高度"
-              value={config.butterflyVerticalSpread}
-              min={0.35}
-              max={1.15}
-              step={0.01}
-              display={`${Math.round(config.butterflyVerticalSpread * 100)}%`}
-              onChange={(value) => onConfigChange("butterflyVerticalSpread", value)}
+              label="环绕高度"
+              value={config.butterflyOrbitHeight}
+              min={8}
+              max={96}
+              step={1}
+              display={`${Math.round(config.butterflyOrbitHeight)}px`}
+              onChange={(value) => onConfigChange("butterflyOrbitHeight", value)}
             />
             <Parameter
-              label="漫游幅度"
-              value={config.butterflyRoam}
-              min={0.15}
-              max={1.7}
+              label="轨道速度"
+              value={config.butterflyOrbitSpeed}
+              min={0.2}
+              max={2.4}
               step={0.05}
-              display={`${formatValue(config.butterflyRoam)}x`}
-              onChange={(value) => onConfigChange("butterflyRoam", value)}
+              display={`${formatValue(config.butterflyOrbitSpeed)}x`}
+              onChange={(value) => onConfigChange("butterflyOrbitSpeed", value)}
             />
             <Parameter
-              label="聚集度"
-              value={config.butterflyCohesion}
+              label="轨道倾角"
+              value={config.butterflyOrbitTilt}
+              min={-60}
+              max={60}
+              step={1}
+              display={`${Math.round(config.butterflyOrbitTilt)}°`}
+              onChange={(value) => onConfigChange("butterflyOrbitTilt", value)}
+            />
+            <Parameter
+              label="轨道呼吸"
+              value={config.butterflyOrbitWobble}
               min={0}
-              max={1.2}
+              max={0.8}
+              step={0.01}
+              display={`${Math.round(config.butterflyOrbitWobble * 100)}%`}
+              onChange={(value) => onConfigChange("butterflyOrbitWobble", value)}
+            />
+            <Parameter
+              label="轨道漂移"
+              value={config.butterflyOrbitDrift}
+              min={0}
+              max={1.4}
               step={0.05}
-              display={formatValue(config.butterflyCohesion)}
-              onChange={(value) => onConfigChange("butterflyCohesion", value)}
+              display={`${formatValue(config.butterflyOrbitDrift)}x`}
+              onChange={(value) => onConfigChange("butterflyOrbitDrift", value)}
+            />
+            <Parameter
+              label="花朵跟随"
+              value={config.butterflyFlowerAttraction}
+              min={0.15}
+              max={1.8}
+              step={0.05}
+              display={formatValue(config.butterflyFlowerAttraction)}
+              onChange={(value) => onConfigChange("butterflyFlowerAttraction", value)}
             />
             <Parameter
               label="飞行速度"
@@ -246,7 +269,7 @@ export function ControlPanel({
         </ParameterSection>
       </div>
 
-      <p className="motion-note">默认蝴蝶均匀分布在花丛上方，也可以实验左右展开、中心扩散、全场漂游或围绕花朵飞行。</p>
+      <p className="motion-note">每只蝴蝶绑定一朵花，围绕花头形成独立轨道。半径、倾角、呼吸和漂移都会实时作用于完成态。</p>
     </aside>
   );
 }
@@ -278,31 +301,18 @@ function CollapseModeControl({ value, onChange }: CollapseModeControlProps) {
   );
 }
 
-interface ButterflyDistributionControlProps {
-  value: ButterflyDistribution;
-  onChange: (value: ButterflyDistribution) => void;
-}
-
-function ButterflyDistributionControl({ value, onChange }: ButterflyDistributionControlProps) {
+function FlowerOrbitModeControl() {
   return (
-    <label className="parameter-control parameter-control-wide">
+    <div className="parameter-control parameter-control-wide mode-lock" aria-label="当前蝴蝶飞行模式">
       <span className="parameter-topline">
-        <span>分布模式</span>
-        <output>实时</output>
+        <span>飞行模式</span>
+        <output>固定</output>
       </span>
-      <select
-        className="mode-select"
-        value={value}
-        onChange={(event) => onChange(event.target.value as ButterflyDistribution)}
-        aria-label="蝴蝶分布模式"
-      >
-        <option value="canopy">花丛上方均匀</option>
-        <option value="sides">左右两翼展开</option>
-        <option value="center">中心向外扩散</option>
-        <option value="full-field">全场宽幅漂游</option>
-        <option value="flower-orbit">围绕花朵飞行</option>
-      </select>
-    </label>
+      <div className="mode-lock-value">
+        <strong>围绕花朵飞行</strong>
+        <span>每只蝴蝶跟随自己的花头</span>
+      </div>
+    </div>
   );
 }
 
