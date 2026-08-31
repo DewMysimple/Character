@@ -55,8 +55,6 @@ const CODE_LINE_STEP = 17;
 const MAX_CODE_COLUMN = Math.max(...CODE_LINES.map((line) => line.length - 1));
 const COLLAPSE_FOCUS_COLUMN = Math.round(MAX_CODE_COLUMN / 2);
 const COLLAPSE_FOCUS_LINE = 5;
-const COLLAPSE_FOCUS_X = CODE_START_X + COLLAPSE_FOCUS_COLUMN * CODE_CHAR_STEP;
-const COLLAPSE_FOCUS_Y = CODE_START_Y + COLLAPSE_FOCUS_LINE * CODE_LINE_STEP;
 
 export const STAGE_LABELS: Record<Stage, string> = {
   intro: "场景准备",
@@ -462,64 +460,34 @@ export class SceneEngine {
         glyph.active = true;
         glyph.x = CODE_START_X + glyph.sourceColumn * CODE_CHAR_STEP;
         glyph.y = CODE_START_Y + glyph.sourceLine * CODE_LINE_STEP;
-        const collapseTarget = this.getCollapseTarget(glyph, 0);
-        glyph.vx =
-          (collapseTarget.x - glyph.x) * 0.02 +
-          (seededRandom(glyph.seed + 23) - 0.5) * 0.35;
-        glyph.vy = (collapseTarget.y - glyph.y) * 0.02 + seededRandom(glyph.seed + 24) * 0.3;
+        glyph.vx = (seededRandom(glyph.seed + 23) - 0.5) * 0.35;
+        glyph.vy = seededRandom(glyph.seed + 24) * 0.3;
       }
       if (!glyph.active) return;
 
       const glyphAge = Math.max(0, this.time - glyph.releaseAt);
-      const collapseDuration = Math.max(0.2, glyph.collapseAt - glyph.releaseAt);
-      const inCollapse = glyphAge < collapseDuration;
       const flutter = Math.sin(glyphAge * 18 + glyph.flutterPhase) * 0.23;
 
-      if (inCollapse) {
-        const collapseProgress = easeInOut(clamp(glyphAge / collapseDuration, 0, 1));
-        const collapseTarget = this.getCollapseTarget(glyph, collapseProgress);
-        const frameDelta = Math.max(1, delta * 60);
-        const follow = clamp(
-          (this.config.collapseMode === "local-collapse" ? 0.17 : 0.13) * frameDelta,
-          0,
-          0.28,
-        );
-        const swirl =
-          Math.sin(glyphAge * 15 + glyph.turbulencePhase) *
-          (this.config.collapseMode === "column-collapse" ? 0.012 : 0.02) *
-          (1 - collapseProgress);
-        const nextX = glyph.x + (collapseTarget.x - glyph.x) * follow + swirl;
-        const nextY = glyph.y + (collapseTarget.y - glyph.y) * follow;
-        glyph.vx = (nextX - glyph.x) / frameDelta;
-        glyph.vy = Math.max(0, (nextY - glyph.y) / frameDelta);
-        glyph.x = nextX;
-        glyph.y = nextY;
-      } else {
-        const exitProgress = clamp((glyphAge - collapseDuration) / 0.5, 0, 1);
-        const centerPull =
-          (COLLAPSE_CENTER_X - glyph.x) * this.config.centerAttraction * 0.0032;
-        const dropAcceleration = this.config.gravity * (0.12 + exitProgress * 0.055);
-        const turbulence = Math.sin(glyphAge * 9 + glyph.turbulencePhase) * 0.02;
-        glyph.vx +=
-          (this.config.wind * 0.002 + centerPull + flutter * 0.014 + turbulence) * delta * 60;
-        glyph.vy +=
-          (dropAcceleration + Math.cos(glyphAge * 7 + glyph.flutterPhase) * 0.022) * delta * 60;
-        glyph.vy = Math.max(0, glyph.vy);
+      const centerDrift =
+        this.config.collapseMode === "center-collapse"
+          ? (COLLAPSE_CENTER_X - glyph.x) * this.config.centerAttraction * 0.00045
+          : 0;
+      const turbulence = Math.sin(glyphAge * 9 + glyph.turbulencePhase) * 0.02;
+      const dropAcceleration = this.config.gravity * (0.18 + clamp(glyphAge / 1.6, 0, 1) * 0.045);
+      glyph.vx +=
+        (this.config.wind * 0.002 + centerDrift + flutter * 0.014 + turbulence) * delta * 60;
+      glyph.vy +=
+        (dropAcceleration + Math.cos(glyphAge * 7 + glyph.flutterPhase) * 0.022) * delta * 60;
+      glyph.vy = Math.max(0, glyph.vy);
+      glyph.vx *= this.config.drag;
+      glyph.vy *= this.config.drag;
+      const glyphSpeed = Math.hypot(glyph.vx, glyph.vy);
+      if (glyphSpeed > 18) {
+        glyph.vx = (glyph.vx / glyphSpeed) * 18;
+        glyph.vy = (glyph.vy / glyphSpeed) * 18;
       }
-      if (inCollapse) {
-        glyph.vx *= 0.96;
-        glyph.vy *= 0.98;
-      } else {
-        glyph.vx *= this.config.drag;
-        glyph.vy *= this.config.drag;
-        const glyphSpeed = Math.hypot(glyph.vx, glyph.vy);
-        if (glyphSpeed > 18) {
-          glyph.vx = (glyph.vx / glyphSpeed) * 18;
-          glyph.vy = (glyph.vy / glyphSpeed) * 18;
-        }
-        glyph.x += glyph.vx * delta * 60;
-        glyph.y += glyph.vy * delta * 60;
-      }
+      glyph.x += glyph.vx * delta * 60;
+      glyph.y += glyph.vy * delta * 60;
       glyph.rotation += glyph.rotationSpeed * delta * 60;
 
       const enoughDropTime = glyphAge >= 1.05;
@@ -623,17 +591,12 @@ export class SceneEngine {
         alpha: 0,
         stage: "intro",
         releaseAt,
-        collapseAt: releaseAt + this.config.collapseDuration,
         morphAt:
           releaseAt +
-          this.config.collapseDuration +
-          2.15 +
+          1.85 +
           seededRandom(seed + 7) * 0.38,
         morphThresholdY:
           FLOWER_ZONE_MIN_Y + seededRandom(seed + 8) * (FLOWER_ZONE_MAX_Y - FLOWER_ZONE_MIN_Y),
-        collapseGroup: source.sourceColumn,
-        collapseOffsetX: (seededRandom(seed + 21) - 0.5) * 22,
-        collapseOffsetY: (seededRandom(seed + 22) - 0.5) * 14,
         flutterPhase: seededRandom(seed + 23) * Math.PI * 2,
         turbulencePhase: seededRandom(seed + 24) * Math.PI * 2,
         morphProgress: 0,
@@ -676,51 +639,6 @@ export class SceneEngine {
       0,
       1,
     );
-  }
-
-  private getCollapseTarget(glyph: GlyphParticle, progress: number) {
-    const sourceX = CODE_START_X + glyph.sourceColumn * CODE_CHAR_STEP;
-    const sourceY = CODE_START_Y + glyph.sourceLine * CODE_LINE_STEP;
-    const columnDrift = (COLLAPSE_CENTER_X - sourceX) * 0.12;
-
-    if (this.config.collapseMode === "local-collapse") {
-      return {
-        x:
-          sourceX +
-          (COLLAPSE_FOCUS_X - sourceX) * 0.76 * progress +
-          glyph.collapseOffsetX * 0.08 * progress,
-        y:
-          sourceY +
-          (COLLAPSE_FOCUS_Y - sourceY) * 0.76 * progress +
-          92 * progress,
-      };
-    }
-
-    if (this.config.collapseMode === "column-collapse") {
-      return {
-        x: sourceX + columnDrift * progress + glyph.collapseOffsetX * 0.07 * progress,
-        y: sourceY + 118 * progress + glyph.sourceLine * 2.2 * progress,
-      };
-    }
-
-    if (this.config.collapseMode === "wave-collapse") {
-      const waveOffset = Math.sin(glyph.sourceColumn * 0.5 + glyph.sourceLine * 0.8) * 18;
-      return {
-        x:
-          COLLAPSE_CENTER_X +
-          waveOffset * (1 - progress) +
-          (sourceX - COLLAPSE_CENTER_X) * 0.08,
-        y:
-          COLLAPSE_CENTER_Y +
-          (sourceY - COLLAPSE_CENTER_Y) * 0.12 +
-          waveOffset * 0.12 * progress,
-      };
-    }
-
-    return {
-      x: COLLAPSE_CENTER_X + glyph.collapseOffsetX,
-      y: COLLAPSE_CENTER_Y + glyph.collapseOffsetY,
-    };
   }
 
   private buildStems() {

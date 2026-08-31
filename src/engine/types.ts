@@ -35,12 +35,8 @@ export interface GlyphParticle {
   alpha: number;
   stage: Stage;
   releaseAt: number;
-  collapseAt: number;
   morphAt: number;
   morphThresholdY: number;
-  collapseGroup: number;
-  collapseOffsetX: number;
-  collapseOffsetY: number;
   flutterPhase: number;
   turbulencePhase: number;
   morphProgress: number;
