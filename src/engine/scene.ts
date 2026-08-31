@@ -58,7 +58,9 @@ const MAX_CODE_COLUMN = Math.max(...CODE_LINES.map((line) => line.length - 1));
 const COLLAPSE_FOCUS_COLUMN = Math.round(MAX_CODE_COLUMN / 2);
 const COLLAPSE_FOCUS_LINE = 5;
 const COLUMN_COLLAPSE_CORE_RADIUS = 2;
-const COLUMN_COLLAPSE_GROUP_WIDTH = 4;
+const COLUMN_COLLAPSE_OUTER_COLUMN_WIDTH = 1;
+const COLUMN_COLLAPSE_CORE_STAGGER = 0.08;
+const COLUMN_COLLAPSE_COLUMN_JITTER = 0.026;
 const COLLAPSE_START_TIME = 1.12;
 const SOURCE_GLYPH_FADE_DURATION = 0.14;
 
@@ -74,7 +76,7 @@ const getColumnCollapseGroup = (sourceColumn: number) => {
   return (
     1 +
     Math.floor(
-      (distance - COLUMN_COLLAPSE_CORE_RADIUS - 1) / COLUMN_COLLAPSE_GROUP_WIDTH,
+      (distance - COLUMN_COLLAPSE_CORE_RADIUS - 1) / COLUMN_COLLAPSE_OUTER_COLUMN_WIDTH,
     )
   );
 };
@@ -803,13 +805,7 @@ export class SceneEngine {
       return normalizedDistance ** 1.38;
     }
     if (mode === "column-collapse") {
-      const group = getColumnCollapseGroup(source.sourceColumn);
-      const maxDistance = Math.max(
-        COLLAPSE_FOCUS_COLUMN,
-        MAX_CODE_COLUMN - COLLAPSE_FOCUS_COLUMN,
-      );
-      const maxGroup = getColumnCollapseGroup(COLLAPSE_FOCUS_COLUMN - maxDistance);
-      return clamp(group / Math.max(1, maxGroup), 0, 1);
+      return this.getColumnCollapseReleaseOrder(source.sourceColumn);
     }
     if (mode === "wave-collapse") {
       return clamp(centeredColumnDistance * 0.68 + rowProgress * 0.32, 0, 1);
@@ -833,6 +829,51 @@ export class SceneEngine {
     const characterNoise = seededRandom(seed + 29);
     const noiseWeight = mode === "local-collapse" ? 0.34 : 0.22;
     return clamp(collapseOrder * (1 - noiseWeight) + characterNoise * noiseWeight, 0, 1);
+  }
+
+  private getColumnCollapseReleaseOrder(sourceColumn: number) {
+    const signedOffset = sourceColumn - COLLAPSE_FOCUS_COLUMN;
+    const distance = Math.abs(signedOffset);
+    const maxDistance = Math.max(
+      COLLAPSE_FOCUS_COLUMN,
+      MAX_CODE_COLUMN - COLLAPSE_FOCUS_COLUMN,
+    );
+    const columnNoise =
+      (seededRandom(this.seed + sourceColumn * 13.17 + 204) - 0.5) *
+      COLUMN_COLLAPSE_COLUMN_JITTER;
+
+    if (distance <= COLUMN_COLLAPSE_CORE_RADIUS) {
+      // Open the initial breach from the center, then let its neighboring
+      // columns follow in a short, readable leak instead of one shared burst.
+      const coreRank =
+        distance === 0
+          ? 0
+          : distance === 1
+            ? signedOffset < 0
+              ? 1
+              : 2
+            : signedOffset < 0
+              ? 3
+              : 4;
+      return clamp(
+        (coreRank / 4) * COLUMN_COLLAPSE_CORE_STAGGER + columnNoise * 0.35,
+        0,
+        1,
+      );
+    }
+
+    const outerDistance = distance - COLUMN_COLLAPSE_CORE_RADIUS;
+    const outerMaxDistance = Math.max(1, maxDistance - COLUMN_COLLAPSE_CORE_RADIUS);
+    const sideBias = signedOffset > 0 ? 0.012 : -0.012;
+    const outwardProgress = outerDistance / outerMaxDistance;
+    return clamp(
+      COLUMN_COLLAPSE_CORE_STAGGER +
+        outwardProgress * (1 - COLUMN_COLLAPSE_CORE_STAGGER) +
+        sideBias +
+        columnNoise,
+      0,
+      1,
+    );
   }
 
   private getParticleSources(count: number, mode: CollapseMode): ParticleSourcePlan[] {
