@@ -3,7 +3,7 @@ type: moc
 status: active
 kind: process
 importance: high
-updated: 2026-08-31
+updated: 2026-09-01
 topic: work-log-index
 source_logs: []
 supersedes: null
@@ -15,6 +15,7 @@ supersedes: null
 
 | 时间 | 类型 | 目标 | 状态 | 主题 | 日志 |
 | --- | --- | --- | --- | --- | --- |
+| 2026-09-01 | fix | 对照参考视频延长坍塌传播，并让默认局部模式按单字符独立释放、单向重力下落和长帧子步更新。 | archived | reference-calibrated-independent-glyph-collapse | [[日志/2026-09-01-参考视频校准与逐字符坍塌物理.md|2026-09-01｜参考视频校准与逐字符坍塌物理]] |
 | 2026-08-31 | bug | 让同列坍方以连续列缺口为单位向外泄露，整列文字整体掉落而非零件散落。 | archived | column-collapse-whole-column-gap | [[日志/2026-08-31-同列坍方整列缺口修复.md|2026-08-31｜同列坍方整列缺口修复]] |
 | 2026-08-31 | bug | 修复指针扰动时花头与枝干分离，让整株花朵带动枝干左右移动且根部固定。 | archived | connected-flower-pointer-pose | [[日志/2026-08-31-整株花朵指针联动修复.md|2026-08-31｜整株花朵指针联动修复]] |
 | 2026-08-31 | fix | 让指针只扰动花朵主体，并移除完成态没有花朵对应的孤立根。 | archived | flower-body-pointer-and-orphan-roots | [[日志/2026-08-31-花朵主体扰动与空根修复.md|2026-08-31｜花朵主体扰动与空根修复]] |

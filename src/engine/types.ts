@@ -133,7 +133,7 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   centerAttraction: 0.58,
   drag: 0.988,
   morphDuration: 1.05,
-  collapseDuration: 1.4,
+  collapseDuration: 3.2,
   collapseMode: "local-collapse",
   particleCount: 420,
   speed: 1,

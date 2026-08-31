@@ -145,10 +145,10 @@ export function ControlPanel({
             <Parameter
               label="坍塌时长"
               value={config.collapseDuration}
-              min={0.7}
-              max={2.4}
-              step={0.05}
-              display={`${formatValue(config.collapseDuration)}s`}
+              min={1.4}
+              max={4.8}
+              step={0.1}
+              display={`${formatValue(config.collapseDuration, 1)}s`}
               onChange={(value) => onConfigChange("collapseDuration", value)}
             />
             <Parameter

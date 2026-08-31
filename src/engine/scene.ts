@@ -59,6 +59,8 @@ const COLLAPSE_FOCUS_COLUMN = Math.round(MAX_CODE_COLUMN / 2);
 const COLLAPSE_FOCUS_LINE = 5;
 const COLUMN_COLLAPSE_CORE_RADIUS = 2;
 const COLUMN_COLLAPSE_GROUP_WIDTH = 4;
+const COLLAPSE_START_TIME = 1.12;
+const SOURCE_GLYPH_FADE_DURATION = 0.14;
 
 type ParticleSource = (typeof PARTICLE_POSITIONS)[number];
 type ParticleSourcePlan = {
@@ -160,10 +162,13 @@ const drawCodeCard = (
 
   context.font = "10px 'SFMono-Regular', Consolas, monospace";
   context.textBaseline = "middle";
-  const missingGlyphs = new Set(
+  const missingGlyphs = new Map(
     glyphs
       .filter((glyph) => glyph.active)
-      .map((glyph) => `${glyph.sourceLine}:${glyph.sourceColumn}`),
+      .map((glyph) => [
+        `${glyph.sourceLine}:${glyph.sourceColumn}`,
+        clamp((time - glyph.releaseAt) / SOURCE_GLYPH_FADE_DURATION, 0, 1),
+      ]),
   );
   CODE_LINES.forEach((line, lineIndex) => {
     const y = cardY + 42 + lineIndex * CODE_LINE_STEP;
@@ -175,12 +180,14 @@ const drawCodeCard = (
     const reveal = clamp((time - 0.2) / 0.9, 0, 1);
     const visibleLength = Math.ceil(line.length * reveal);
     [...line.slice(0, visibleLength)].forEach((character, characterIndex) => {
-      if (missingGlyphs.has(`${lineIndex}:${characterIndex}`)) return;
+      const sourceFade = missingGlyphs.get(`${lineIndex}:${characterIndex}`) ?? 0;
       const color = CODE_PALETTE[(lineIndex * 7 + characterIndex) % CODE_PALETTE.length];
+      context.globalAlpha = 1 - sourceFade;
       context.fillStyle = character === " " ? "rgba(70, 68, 63, 0.52)" : color;
       context.fillText(character, cardX + 50 + characterIndex * CODE_CHAR_STEP, y);
     });
   });
+  context.globalAlpha = 1;
   context.restore();
 };
 
@@ -474,7 +481,14 @@ export class SceneEngine {
   advance(realDelta: number) {
     const delta = clamp(realDelta, 0, 0.05) * this.config.speed;
     if (delta <= 0) return;
-    this.step(delta);
+
+    // Keep a dropped frame from turning into a visible physics jump. Normal
+    // frames still use one step; only a long frame is split into safe slices.
+    const substeps = Math.max(1, Math.ceil(delta * 60));
+    const substepDelta = delta / substeps;
+    for (let index = 0; index < substeps; index += 1) {
+      this.step(substepDelta);
+    }
   }
 
   getSnapshot(): SceneSnapshot {
@@ -515,12 +529,12 @@ export class SceneEngine {
         glyph.y = CODE_START_Y + glyph.sourceLine * CODE_LINE_STEP;
         glyph.vx =
           this.config.collapseMode === "column-collapse"
-            ? (seededRandom(this.seed + glyph.sourceColumn * 2.61 + 41) - 0.5) * 0.08
-            : (seededRandom(glyph.seed + 23) - 0.5) * 0.35;
+            ? (seededRandom(this.seed + glyph.sourceColumn * 2.61 + 41) - 0.5) * 0.035
+            : (seededRandom(glyph.seed + 23) - 0.5) * 0.12;
         glyph.vy =
           this.config.collapseMode === "column-collapse"
-            ? 0.06 + seededRandom(this.seed + glyph.sourceColumn * 3.17 + 91) * 0.05
-            : seededRandom(glyph.seed + 24) * 0.3;
+            ? 0.012 + seededRandom(this.seed + glyph.sourceColumn * 3.17 + 91) * 0.025
+            : 0.008 + seededRandom(glyph.seed + 24) * 0.035;
       }
       if (!glyph.active) return;
 
@@ -537,10 +551,11 @@ export class SceneEngine {
       const turbulence = isColumnCollapse
         ? Math.sin(glyphAge * 3.8 + glyph.sourceColumn * 0.47) * 0.008
         : Math.sin(glyphAge * 9 + glyph.turbulencePhase) * 0.02;
-      const dropAcceleration = this.config.gravity * (0.18 + clamp(glyphAge / 1.6, 0, 1) * 0.045);
+      const dropAcceleration =
+        this.config.gravity * (0.065 + clamp(glyphAge / 2.6, 0, 1) * 0.022);
       const verticalJitter = isColumnCollapse
-        ? Math.sin(glyphAge * 4.2 + glyph.sourceColumn * 0.54) * 0.004
-        : Math.cos(glyphAge * 7 + glyph.flutterPhase) * 0.022;
+        ? 0
+        : Math.cos(glyphAge * 7 + glyph.flutterPhase) * 0.0025;
       glyph.vx +=
         (this.config.wind * 0.002 + centerDrift + flutter * (isColumnCollapse ? 0.004 : 0.014) + turbulence) *
         delta *
@@ -551,15 +566,15 @@ export class SceneEngine {
       glyph.vx *= this.config.drag;
       glyph.vy *= this.config.drag;
       const glyphSpeed = Math.hypot(glyph.vx, glyph.vy);
-      if (glyphSpeed > 18) {
-        glyph.vx = (glyph.vx / glyphSpeed) * 18;
-        glyph.vy = (glyph.vy / glyphSpeed) * 18;
+      if (glyphSpeed > 14) {
+        glyph.vx = (glyph.vx / glyphSpeed) * 14;
+        glyph.vy = (glyph.vy / glyphSpeed) * 14;
       }
       glyph.x += glyph.vx * delta * 60;
       glyph.y += glyph.vy * delta * 60;
       glyph.rotation += glyph.rotationSpeed * delta * 60;
 
-      const enoughDropTime = glyphAge >= 1.05;
+      const enoughDropTime = glyphAge >= 1.25;
       const reachedFlowerZone = glyph.y >= glyph.morphThresholdY;
       const safeFallback = this.time >= glyph.morphAt && glyph.y >= FLOWER_ZONE_MIN_Y - 70;
       if (glyph.stage !== "morphing" && enoughDropTime && (reachedFlowerZone || safeFallback)) {
@@ -700,10 +715,22 @@ export class SceneEngine {
   }
 
   private getStage(): Stage {
-    if (this.time < 1.4) return "intro";
-    if (this.time < 3.35) return "falling";
-    if (this.time < 5.2) return "morphing";
+    const releaseJitterWindow = this.config.collapseMode === "column-collapse" ? 0 : 0.24;
+    const collapseEnd =
+      COLLAPSE_START_TIME + this.getCollapseReleaseSpan() + releaseJitterWindow;
+    const morphEnd = Math.min(SCENE_DURATION - 1.1, collapseEnd + 1.5);
+    if (this.time < COLLAPSE_START_TIME) return "intro";
+    if (this.time < collapseEnd) return "falling";
+    if (this.time < morphEnd) return "morphing";
     return "bloom";
+  }
+
+  private getCollapseReleaseSpan() {
+    const configuredDuration = clamp(this.config.collapseDuration, 1.4, 4.8);
+    return this.config.collapseMode === "local-collapse" ||
+      this.config.collapseMode === "column-collapse"
+      ? configuredDuration
+      : Math.max(1.5, configuredDuration * 0.72);
   }
 
   private buildGlyphs() {
@@ -717,17 +744,13 @@ export class SceneEngine {
       const releaseJitter =
         this.config.collapseMode === "column-collapse"
           ? 0
-          : seededRandom(seed) * 0.08;
-      const releaseSpan =
-        this.config.collapseMode === "local-collapse"
-          ? this.config.collapseDuration * 1.6
-          : this.config.collapseMode === "column-collapse"
-            ? Math.max(0.45, this.config.collapseDuration * 0.95)
-            : 1.5;
+          : seededRandom(seed + 29) * 0.24;
+      const releaseSpan = this.getCollapseReleaseSpan();
       const releaseAt = sourcePlan.collapsible
-        ? (this.config.collapseMode === "local-collapse" ? 1.24 : 1.18) +
-          collapseOrder * releaseSpan +
-          releaseJitter
+        ? Math.max(
+            COLLAPSE_START_TIME,
+            COLLAPSE_START_TIME + collapseOrder * releaseSpan + releaseJitter,
+          )
         : Number.POSITIVE_INFINITY;
       this.glyphs.push({
         id: index,
@@ -743,7 +766,7 @@ export class SceneEngine {
         stage: "intro",
         releaseAt,
         morphAt: sourcePlan.collapsible
-          ? releaseAt + 1.85 + seededRandom(seed + 7) * 0.38
+          ? releaseAt + 1.6 + seededRandom(seed + 7) * 0.28
           : Number.POSITIVE_INFINITY,
         morphThresholdY:
           FLOWER_ZONE_MIN_Y + seededRandom(seed + 8) * (FLOWER_ZONE_MAX_Y - FLOWER_ZONE_MIN_Y),
@@ -775,7 +798,15 @@ export class SceneEngine {
         Math.hypot(COLLAPSE_FOCUS_COLUMN, COLLAPSE_FOCUS_LINE * 2.65),
         Math.hypot(MAX_CODE_COLUMN - COLLAPSE_FOCUS_COLUMN, (CODE_LINES.length - 1 - COLLAPSE_FOCUS_LINE) * 2.65),
       );
-      return clamp((localDistance - 1.2) / Math.max(1, maxDistance - 1.2), 0, 1);
+      const normalizedDistance = clamp(
+        (localDistance - 1.2) / Math.max(1, maxDistance - 1.2),
+        0,
+        1,
+      );
+      // Hold the breach close to its origin, then let the failure front
+      // travel outward. This keeps the early gap readable instead of
+      // turning the card into a full-width particle burst.
+      return normalizedDistance ** 1.38;
     }
     if (mode === "column-collapse") {
       const group = getColumnCollapseGroup(source.sourceColumn);
