@@ -108,16 +108,6 @@ export interface Flower {
   pointerOffset: number;
 }
 
-export interface StemSeed {
-  x: number;
-  groundY: number;
-  height: number;
-  sway: number;
-  leafSide: number;
-  opacity: number;
-  startAt: number;
-}
-
 export interface SceneSnapshot {
   time: number;
   stage: Stage;

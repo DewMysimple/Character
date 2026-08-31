@@ -11,7 +11,6 @@ import {
   type SceneSnapshot,
   type ScenePointer,
   type Stage,
-  type StemSeed,
 } from "./types";
 
 const CODE_LINES = [
@@ -178,63 +177,27 @@ const drawTitle = (context: CanvasRenderingContext2D, time: number) => {
   context.restore();
 };
 
-const drawStem = (
-  context: CanvasRenderingContext2D,
-  stem: StemSeed,
-  time: number,
-) => {
-  const progress = easeOutCubic(clamp((time - stem.startAt) / 1.35, 0, 1));
-  if (progress <= 0) return;
-
-  const groundY = stem.groundY;
-  const topY = groundY - stem.height * progress;
-  const curve = stem.sway * Math.sin(progress * Math.PI * 0.8);
-
-  context.save();
-  context.globalAlpha = stem.opacity;
-  context.strokeStyle = "#777e72";
-  context.lineWidth = 1.25;
-  context.beginPath();
-  context.moveTo(stem.x, groundY);
-  context.quadraticCurveTo(stem.x + curve, groundY - stem.height * 0.48, stem.x + curve * 0.45, topY);
-  context.stroke();
-
-  const leafProgress = clamp((progress - 0.35) / 0.65, 0, 1);
-  if (leafProgress > 0) {
-    const leafY = groundY - stem.height * 0.45;
-    const leafX = stem.x + curve * 0.55;
-    context.fillStyle = "rgba(144, 157, 142, 0.56)";
-    context.beginPath();
-    context.ellipse(
-      leafX - stem.leafSide * 7,
-      leafY - 6 * leafProgress,
-      10 * leafProgress,
-      4.2 * leafProgress,
-      stem.leafSide * -0.35,
-      0,
-      Math.PI * 2,
-    );
-    context.fill();
-    context.beginPath();
-    context.ellipse(
-      leafX + stem.leafSide * 7,
-      leafY - 39 * leafProgress,
-      9 * leafProgress,
-      3.8 * leafProgress,
-      stem.leafSide * 0.35,
-      0,
-      Math.PI * 2,
-    );
-    context.fill();
-  }
-  context.restore();
+const getFlowerWindOffset = (flower: Flower, motionTime: number, windStrength: number) => {
+  const naturalAmplitude = 2.5 + Math.abs(flower.sway) * 0.12;
+  return (
+    Math.sin(motionTime * 0.68 + flower.windPhase) * naturalAmplitude * (0.35 + windStrength)
+  );
 };
 
-const getFlowerSway = (flower: Flower, motionTime: number, windStrength: number) => {
-  const naturalAmplitude = 2.5 + Math.abs(flower.sway) * 0.12;
-  const naturalSway =
-    Math.sin(motionTime * 0.68 + flower.windPhase) * naturalAmplitude * (0.35 + windStrength);
-  return flower.sway + naturalSway + flower.pointerOffset;
+const getFlowerStemSway = (flower: Flower, motionTime: number, windStrength: number) =>
+  flower.sway + getFlowerWindOffset(flower, motionTime, windStrength);
+
+const getFlowerHeadPosition = (
+  flower: Flower,
+  motionTime: number,
+  windStrength: number,
+) => {
+  const stemSway = getFlowerStemSway(flower, motionTime, windStrength);
+  const bodyWind = getFlowerWindOffset(flower, motionTime, windStrength) * 0.35;
+  return {
+    x: flower.x + stemSway * 0.45 + bodyWind + flower.pointerOffset,
+    y: flower.groundY - flower.height,
+  };
 };
 
 const drawFlower = (
@@ -248,9 +211,11 @@ const drawFlower = (
   const stemProgress = easeOutCubic(flower.stemProgress);
   const leafProgress = easeOutCubic(flower.leafProgress);
   const petalProgress = easeOutCubic(flower.petalProgress);
-  const dynamicSway = getFlowerSway(flower, motionTime, windStrength);
-  const tipX = flower.x + dynamicSway * Math.sin(stemProgress * Math.PI);
-  const tipY = flower.groundY - flower.height * easeOutCubic(flower.stemProgress);
+  const stemSway = getFlowerStemSway(flower, motionTime, windStrength);
+  const tipX = flower.x + stemSway * 0.45 * stemProgress;
+  const tipY = flower.groundY - flower.height * stemProgress;
+  const bodyWind = getFlowerWindOffset(flower, motionTime, windStrength) * 0.35;
+  const bodyX = tipX + bodyWind + flower.pointerOffset;
 
   context.save();
   context.globalAlpha = 0.74 * stemProgress;
@@ -259,7 +224,7 @@ const drawFlower = (
   context.beginPath();
   context.moveTo(flower.x, flower.groundY);
   context.quadraticCurveTo(
-    flower.x + dynamicSway,
+    flower.x + stemSway,
     flower.groundY - flower.height * 0.45,
     tipX,
     tipY,
@@ -268,7 +233,7 @@ const drawFlower = (
 
   if (leafProgress > 0) {
     const leafY = flower.groundY - flower.height * 0.48;
-    const leafX = flower.x + dynamicSway * 0.54;
+    const leafX = flower.x + stemSway * 0.54;
     context.fillStyle = "rgba(144, 157, 142, 0.58)";
     context.beginPath();
     context.ellipse(
@@ -304,7 +269,7 @@ const drawFlower = (
   for (let index = 0; index < petalCount; index += 1) {
     const angle = (Math.PI * 2 * index) / petalCount - Math.PI / 2;
     context.save();
-    context.translate(tipX, tipY);
+    context.translate(bodyX, tipY);
     context.rotate(angle);
     context.globalAlpha = 0.74 * petalProgress;
     context.fillStyle = flower.color;
@@ -318,7 +283,7 @@ const drawFlower = (
   }
   context.fillStyle = "rgba(164, 133, 96, 0.78)";
   context.beginPath();
-  context.arc(tipX, tipY, 2.1 * petalProgress, 0, Math.PI * 2);
+  context.arc(bodyX, tipY, 2.1 * petalProgress, 0, Math.PI * 2);
   context.fill();
   context.restore();
 };
@@ -377,7 +342,6 @@ export class SceneEngine {
   private glyphs: GlyphParticle[] = [];
   private butterflies: Butterfly[] = [];
   private flowers: Flower[] = [];
-  private stems: StemSeed[] = [];
   private viewport = { width: DESIGN_WIDTH, height: DESIGN_HEIGHT };
   private backgroundCanvas: HTMLCanvasElement | null = null;
   private pointer: ScenePointer | null = null;
@@ -419,7 +383,6 @@ export class SceneEngine {
     this.butterflies = [];
     this.flowers = [];
     this.backgroundCanvas = null;
-    this.buildStems();
     this.buildFlowers();
     this.buildGlyphs();
   }
@@ -466,7 +429,6 @@ export class SceneEngine {
     if (this.backgroundCanvas) context.drawImage(this.backgroundCanvas, 0, 0, width, height);
     drawCodeCard(context, this.time, this.glyphs);
     drawTitle(context, this.time);
-    this.stems.forEach((stem) => drawStem(context, stem, this.time));
     this.flowers.forEach((flower) =>
       drawFlower(context, flower, this.motionTime, this.config.flowerWindStrength),
     );
@@ -742,13 +704,13 @@ export class SceneEngine {
   private updateButterflyFlightTarget(butterfly: Butterfly) {
     const flower = this.flowers[butterfly.targetFlowerId];
     if (flower) {
-      const dynamicSway = getFlowerSway(
+      const headPosition = getFlowerHeadPosition(
         flower,
         this.motionTime,
         this.config.flowerWindStrength,
       );
-      butterfly.flowerX = flower.x + dynamicSway * 0.45 + butterfly.flowerOffsetX;
-      butterfly.flowerY = flower.groundY - flower.height;
+      butterfly.flowerX = headPosition.x + butterfly.flowerOffsetX;
+      butterfly.flowerY = headPosition.y;
     }
     butterfly.targetX = clamp(butterfly.flowerX, 34, DESIGN_WIDTH - 34);
     butterfly.targetY = clamp(butterfly.flowerY, BUTTERFLY_ZONE_TOP - 18, DESIGN_HEIGHT - 112);
@@ -760,12 +722,13 @@ export class SceneEngine {
     const pointerFalloff = Math.max(0.1, this.config.pointerFalloff);
 
     this.flowers.forEach((flower) => {
-      const dynamicSway = getFlowerSway(
+      const stemSway = getFlowerStemSway(
         flower,
         this.motionTime,
         this.config.flowerWindStrength,
       );
-      const headX = flower.x + dynamicSway * 0.45;
+      const bodyWind = getFlowerWindOffset(flower, this.motionTime, this.config.flowerWindStrength) * 0.35;
+      const headX = flower.x + stemSway * 0.45 + bodyWind;
       const headY = flower.groundY - flower.height;
       let targetOffset = 0;
 
@@ -787,22 +750,6 @@ export class SceneEngine {
       const smoothing = 1 - Math.exp(-Math.max(0.01, responseRate) * delta * 4);
       flower.pointerOffset += (targetOffset - flower.pointerOffset) * smoothing;
     });
-  }
-
-  private buildStems() {
-    this.stems = [];
-    for (let index = 0; index < 23; index += 1) {
-      const seed = this.seed + index * 29.7;
-      this.stems.push({
-        x: 16 + seededRandom(seed) * 688,
-        groundY: 918 + seededRandom(seed + 2) * 22,
-        height: 116 + seededRandom(seed + 4) * 220,
-        sway: (seededRandom(seed + 5) - 0.5) * 48,
-        leafSide: seededRandom(seed + 7) > 0.5 ? 1 : -1,
-        opacity: 0.26 + seededRandom(seed + 8) * 0.24,
-        startAt: 0.3 + seededRandom(seed + 9) * 0.32,
-      });
-    }
   }
 
   private buildFlowers() {
