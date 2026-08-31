@@ -187,16 +187,58 @@ const getFlowerWindOffset = (flower: Flower, motionTime: number, windStrength: n
 const getFlowerStemSway = (flower: Flower, motionTime: number, windStrength: number) =>
   flower.sway + getFlowerWindOffset(flower, motionTime, windStrength);
 
+const getQuadraticPoint = (
+  startX: number,
+  startY: number,
+  controlX: number,
+  controlY: number,
+  endX: number,
+  endY: number,
+  progress: number,
+) => {
+  const inverse = 1 - progress;
+  return {
+    x: inverse * inverse * startX + 2 * inverse * progress * controlX + progress * progress * endX,
+    y: inverse * inverse * startY + 2 * inverse * progress * controlY + progress * progress * endY,
+  };
+};
+
+const getFlowerPose = (
+  flower: Flower,
+  motionTime: number,
+  windStrength: number,
+  stemProgress = 1,
+  includePointerOffset = true,
+) => {
+  const progress = clamp(stemProgress, 0, 1);
+  const stemSway = getFlowerStemSway(flower, motionTime, windStrength);
+  const bodyWind = getFlowerWindOffset(flower, motionTime, windStrength) * 0.35;
+  const interactiveShift = includePointerOffset ? flower.pointerOffset : 0;
+  const bodyShift = bodyWind + interactiveShift;
+  const rootX = flower.x;
+  const rootY = flower.groundY;
+  const tipX = rootX + (stemSway * 0.45 + bodyShift) * progress;
+  const tipY = rootY - flower.height * progress;
+
+  return {
+    rootX,
+    rootY,
+    controlX: rootX + (stemSway + bodyShift * 0.62) * progress,
+    controlY: rootY - flower.height * 0.45 * progress,
+    tipX,
+    tipY,
+  };
+};
+
 const getFlowerHeadPosition = (
   flower: Flower,
   motionTime: number,
   windStrength: number,
 ) => {
-  const stemSway = getFlowerStemSway(flower, motionTime, windStrength);
-  const bodyWind = getFlowerWindOffset(flower, motionTime, windStrength) * 0.35;
+  const { tipX, tipY } = getFlowerPose(flower, motionTime, windStrength);
   return {
-    x: flower.x + stemSway * 0.45 + bodyWind + flower.pointerOffset,
-    y: flower.groundY - flower.height,
+    x: tipX,
+    y: tipY,
   };
 };
 
@@ -211,34 +253,41 @@ const drawFlower = (
   const stemProgress = easeOutCubic(flower.stemProgress);
   const leafProgress = easeOutCubic(flower.leafProgress);
   const petalProgress = easeOutCubic(flower.petalProgress);
-  const stemSway = getFlowerStemSway(flower, motionTime, windStrength);
-  const tipX = flower.x + stemSway * 0.45 * stemProgress;
-  const tipY = flower.groundY - flower.height * stemProgress;
-  const bodyWind = getFlowerWindOffset(flower, motionTime, windStrength) * 0.35;
-  const bodyX = tipX + bodyWind + flower.pointerOffset;
+  const pose = getFlowerPose(flower, motionTime, windStrength, stemProgress);
 
   context.save();
   context.globalAlpha = 0.74 * stemProgress;
   context.strokeStyle = "rgba(111, 123, 107, 0.74)";
   context.lineWidth = 1.1;
   context.beginPath();
-  context.moveTo(flower.x, flower.groundY);
-  context.quadraticCurveTo(
-    flower.x + stemSway,
-    flower.groundY - flower.height * 0.45,
-    tipX,
-    tipY,
-  );
+  context.moveTo(pose.rootX, pose.rootY);
+  context.quadraticCurveTo(pose.controlX, pose.controlY, pose.tipX, pose.tipY);
   context.stroke();
 
   if (leafProgress > 0) {
-    const leafY = flower.groundY - flower.height * 0.48;
-    const leafX = flower.x + stemSway * 0.54;
+    const upperLeaf = getQuadraticPoint(
+      pose.rootX,
+      pose.rootY,
+      pose.controlX,
+      pose.controlY,
+      pose.tipX,
+      pose.tipY,
+      0.46,
+    );
+    const lowerLeaf = getQuadraticPoint(
+      pose.rootX,
+      pose.rootY,
+      pose.controlX,
+      pose.controlY,
+      pose.tipX,
+      pose.tipY,
+      0.68,
+    );
     context.fillStyle = "rgba(144, 157, 142, 0.58)";
     context.beginPath();
     context.ellipse(
-      leafX - 9,
-      leafY - 8 * leafProgress,
+      upperLeaf.x - 8,
+      upperLeaf.y - 4 * leafProgress,
       12 * leafProgress,
       4.8 * leafProgress,
       -0.36,
@@ -248,8 +297,8 @@ const drawFlower = (
     context.fill();
     context.beginPath();
     context.ellipse(
-      leafX + 9,
-      leafY - 32 * leafProgress,
+      lowerLeaf.x + 8,
+      lowerLeaf.y - 4 * leafProgress,
       11 * leafProgress,
       4.4 * leafProgress,
       0.36,
@@ -269,7 +318,7 @@ const drawFlower = (
   for (let index = 0; index < petalCount; index += 1) {
     const angle = (Math.PI * 2 * index) / petalCount - Math.PI / 2;
     context.save();
-    context.translate(bodyX, tipY);
+    context.translate(pose.tipX, pose.tipY);
     context.rotate(angle);
     context.globalAlpha = 0.74 * petalProgress;
     context.fillStyle = flower.color;
@@ -283,7 +332,7 @@ const drawFlower = (
   }
   context.fillStyle = "rgba(164, 133, 96, 0.78)";
   context.beginPath();
-  context.arc(bodyX, tipY, 2.1 * petalProgress, 0, Math.PI * 2);
+  context.arc(pose.tipX, pose.tipY, 2.1 * petalProgress, 0, Math.PI * 2);
   context.fill();
   context.restore();
 };
@@ -722,19 +771,18 @@ export class SceneEngine {
     const pointerFalloff = Math.max(0.1, this.config.pointerFalloff);
 
     this.flowers.forEach((flower) => {
-      const stemSway = getFlowerStemSway(
+      const naturalPose = getFlowerPose(
         flower,
         this.motionTime,
         this.config.flowerWindStrength,
+        1,
+        false,
       );
-      const bodyWind = getFlowerWindOffset(flower, this.motionTime, this.config.flowerWindStrength) * 0.35;
-      const headX = flower.x + stemSway * 0.45 + bodyWind;
-      const headY = flower.groundY - flower.height;
       let targetOffset = 0;
 
       if (pointer) {
-        const distanceX = headX - pointer.x;
-        const distanceY = headY - pointer.y;
+        const distanceX = naturalPose.tipX - pointer.x;
+        const distanceY = naturalPose.tipY - pointer.y;
         const distance = Math.hypot(distanceX, distanceY);
         if (distance < pointerRadius) {
           const influence = (1 - distance / pointerRadius) ** pointerFalloff;
