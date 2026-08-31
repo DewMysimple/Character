@@ -48,6 +48,8 @@ const COLLAPSE_CENTER_X = DESIGN_WIDTH / 2;
 const COLLAPSE_CENTER_Y = 304;
 const FLOWER_ZONE_MIN_Y = 650;
 const FLOWER_ZONE_MAX_Y = 776;
+const BUTTERFLY_ZONE_TOP = 322;
+const BUTTERFLY_ZONE_BOTTOM = 682;
 const CODE_START_X = 104;
 const CODE_START_Y = 104;
 const CODE_CHAR_STEP = 6.35;
@@ -517,14 +519,28 @@ export class SceneEngine {
       const age = Math.max(0, this.motionTime - butterfly.birthTime);
       butterfly.flightPhase += delta * 7.2;
       butterfly.wingPhase += delta * this.config.wingBeatFrequency * Math.PI * 2;
-      const orbitX = butterfly.targetX + Math.sin(age * 1.18 + butterfly.flightPhase) * butterfly.orbitRadius;
-      const orbitY = butterfly.targetY + Math.cos(age * 1.42 + butterfly.flightPhase) * butterfly.orbitHeight;
+      const spread = this.config.butterflySpread;
+      const wideDriftX = Math.sin(age * 0.42 + butterfly.seed) * 42 * spread;
+      const wideDriftY = Math.cos(age * 0.36 + butterfly.seed * 0.7) * 38 * spread;
+      const orbitX =
+        butterfly.targetX +
+        wideDriftX +
+        Math.sin(age * 1.18 + butterfly.flightPhase) * butterfly.orbitRadius * spread;
+      const orbitY =
+        butterfly.targetY +
+        wideDriftY +
+        Math.cos(age * 1.42 + butterfly.flightPhase) * butterfly.orbitHeight * spread;
       const distanceX = orbitX - butterfly.x;
       const distanceY = orbitY - butterfly.y;
       const drift = Math.cos(age * 2.7 + butterfly.seed) * 0.018;
-      const steering = 0.00105;
-      butterfly.vx += (distanceX * steering + drift + this.config.wind * 0.0012) * delta * 60;
+      const steering = 0.00075 + this.config.centerAttraction * 0.00055;
+      const canopyLift =
+        (BUTTERFLY_ZONE_TOP - butterfly.y) * 0.00006 +
+        (BUTTERFLY_ZONE_BOTTOM - butterfly.y) * 0.000018;
+      butterfly.vx +=
+        (distanceX * steering + drift + this.config.wind * 0.0012) * delta * 60;
       butterfly.vy += (distanceY * steering + Math.sin(age * 2.2 + butterfly.seed) * 0.014) * delta * 60;
+      butterfly.vy += canopyLift * delta * 60;
       butterfly.vx *= 0.982;
       butterfly.vy *= 0.982;
       const flightSpeed = Math.hypot(butterfly.vx, butterfly.vy);
@@ -537,7 +553,11 @@ export class SceneEngine {
       butterfly.rotation += butterfly.rotationSpeed * delta * 60 + butterfly.vx * 0.0006;
       butterfly.alpha = 0.9 * easeOutCubic(clamp(age / 0.34, 0, 1));
 
-      if (!butterfly.flowerLinked && Math.hypot(distanceX, distanceY) < 64) {
+      const flowerDistance = Math.hypot(
+        butterfly.flowerX - butterfly.x,
+        butterfly.flowerY - butterfly.y,
+      );
+      if (!butterfly.flowerLinked && (flowerDistance < 112 || age > 1.65)) {
         butterfly.flowerLinked = true;
         this.activateFlower(
           butterfly.targetFlowerId,
@@ -681,11 +701,20 @@ export class SceneEngine {
     const id = this.butterflies.length;
     const targetFlowerId = id % this.flowers.length;
     const targetFlower = this.flowers[targetFlowerId];
-    const targetX =
+    const flowerX =
       targetFlower.x + targetFlower.sway * 0.45 + (seededRandom(glyph.seed + 13) - 0.5) * 24;
-    const targetY =
-      targetFlower.groundY -
-      targetFlower.height * (0.68 + seededRandom(glyph.seed + 14) * 0.12);
+    const flowerY = targetFlower.groundY - targetFlower.height;
+    const targetX = clamp(
+      flowerX + (seededRandom(glyph.seed + 19) - 0.5) * 150,
+      36,
+      DESIGN_WIDTH - 36,
+    );
+    const canopyBias = seededRandom(glyph.seed + 14);
+    const targetY = clamp(
+      350 + canopyBias * 292 + (flowerY - 650) * 0.22,
+      BUTTERFLY_ZONE_TOP,
+      BUTTERFLY_ZONE_BOTTOM,
+    );
     this.butterflies.push({
       id,
       x: glyph.x,
@@ -700,10 +729,12 @@ export class SceneEngine {
       color: glyph.color,
       seed: glyph.seed,
       targetFlowerId,
+      flowerX,
+      flowerY,
       targetX,
       targetY,
-      orbitRadius: 18 + seededRandom(glyph.seed + 15) * 24,
-      orbitHeight: 10 + seededRandom(glyph.seed + 16) * 18,
+      orbitRadius: 28 + seededRandom(glyph.seed + 15) * 52,
+      orbitHeight: 20 + seededRandom(glyph.seed + 16) * 46,
       flightPhase: seededRandom(glyph.seed + 17) * Math.PI * 2,
       wingPhase: seededRandom(glyph.seed + 18) * Math.PI * 2,
       flowerLinked: false,

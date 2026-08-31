@@ -20,6 +20,7 @@ export interface PhysicsConfig {
   particleCount: number;
   speed: number;
   wingBeatFrequency: number;
+  butterflySpread: number;
 }
 
 export interface GlyphParticle {
@@ -61,6 +62,8 @@ export interface Butterfly {
   color: string;
   seed: number;
   targetFlowerId: number;
+  flowerX: number;
+  flowerY: number;
   targetX: number;
   targetY: number;
   orbitRadius: number;
@@ -119,4 +122,5 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   particleCount: 420,
   speed: 1,
   wingBeatFrequency: 2.8,
+  butterflySpread: 1,
 };

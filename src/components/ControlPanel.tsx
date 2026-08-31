@@ -7,6 +7,7 @@ interface ControlPanelProps {
   snapshot: SceneSnapshot;
   onToggle: () => void;
   onReplay: () => void;
+  onResetConfig: () => void;
   onSeek: (time: number) => void;
   onConfigChange: <Key extends keyof PhysicsConfig>(key: Key, value: PhysicsConfig[Key]) => void;
 }
@@ -19,6 +20,7 @@ export function ControlPanel({
   snapshot,
   onToggle,
   onReplay,
+  onResetConfig,
   onSeek,
   onConfigChange,
 }: ControlPanelProps) {
@@ -84,7 +86,12 @@ export function ControlPanel({
 
       <div className="parameter-heading">
         <span>物理参数</span>
-        <span className="parameter-hint">实时生效</span>
+        <div className="parameter-heading-actions">
+          <span className="parameter-hint">实时生效</span>
+          <button className="reset-button" type="button" onClick={onResetConfig}>
+            恢复默认
+          </button>
+        </div>
       </div>
 
       <div className="parameters-grid">
@@ -164,9 +171,18 @@ export function ControlPanel({
           display={`${formatValue(config.wingBeatFrequency, 1)}Hz`}
           onChange={(value) => onConfigChange("wingBeatFrequency", value)}
         />
+        <Parameter
+          label="蝴蝶范围"
+          value={config.butterflySpread}
+          min={0.55}
+          max={1.65}
+          step={0.05}
+          display={`${formatValue(config.butterflySpread, 2)}x`}
+          onChange={(value) => onConfigChange("butterflySpread", value)}
+        />
       </div>
 
-      <p className="motion-note">同列文字先形成缺口，再像建筑坍方一样分层下落，接近花丛后才变成蝴蝶。</p>
+      <p className="motion-note">蝴蝶会在花丛上方分散盘旋，范围、风力、吸引力和扇翅频率在完成后仍可实时调整。</p>
     </aside>
   );
 }

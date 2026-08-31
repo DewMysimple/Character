@@ -33,6 +33,10 @@ export default function App() {
     setPlaying(true);
   };
 
+  const handleResetConfig = () => {
+    setConfig({ ...DEFAULT_PHYSICS });
+  };
+
   const handleSeek = (time: number) => {
     const nextTime = Math.min(SCENE_DURATION, Math.max(0, time));
     setSeekRequest((request) => ({ token: (request?.token ?? 0) + 1, time: nextTime }));
@@ -82,6 +86,7 @@ export default function App() {
         snapshot={snapshot}
         onToggle={handleToggle}
         onReplay={handleReplay}
+        onResetConfig={handleResetConfig}
         onSeek={handleSeek}
         onConfigChange={handleConfigChange}
       />
