@@ -3,6 +3,11 @@ export const DESIGN_WIDTH = 720;
 export const DESIGN_HEIGHT = 960;
 
 export type Stage = "intro" | "falling" | "morphing" | "bloom";
+export type CollapseMode =
+  | "local-collapse"
+  | "column-collapse"
+  | "center-collapse"
+  | "wave-collapse";
 
 export interface PhysicsConfig {
   gravity: number;
@@ -10,6 +15,8 @@ export interface PhysicsConfig {
   centerAttraction: number;
   drag: number;
   morphDuration: number;
+  collapseDuration: number;
+  collapseMode: CollapseMode;
   particleCount: number;
   speed: number;
   wingBeatFrequency: number;
@@ -31,6 +38,11 @@ export interface GlyphParticle {
   collapseAt: number;
   morphAt: number;
   morphThresholdY: number;
+  collapseGroup: number;
+  collapseOffsetX: number;
+  collapseOffsetY: number;
+  flutterPhase: number;
+  turbulencePhase: number;
   morphProgress: number;
   seed: number;
   sourceLine: number;
@@ -105,8 +117,10 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   wind: 0.24,
   centerAttraction: 0.58,
   drag: 0.988,
-  morphDuration: 0.72,
-  particleCount: 150,
+  morphDuration: 1.05,
+  collapseDuration: 1.4,
+  collapseMode: "local-collapse",
+  particleCount: 420,
   speed: 1,
   wingBeatFrequency: 2.8,
 };

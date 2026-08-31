@@ -313,6 +313,10 @@ input[type="range"]:focus-visible {
   gap: 2px;
 }
 
+.parameter-control-wide {
+  grid-column: 1 / -1;
+}
+
 .parameter-topline {
   font-size: 10px;
 }
@@ -325,6 +329,27 @@ input[type="range"]:focus-visible {
 
 .parameter-control input[type="range"] {
   height: 16px;
+}
+
+.mode-select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  color: #4f6054;
+  background: rgba(255, 255, 255, 0.48);
+  border: 1px solid rgba(75, 101, 86, 0.2);
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.mode-select:hover {
+  border-color: rgba(75, 101, 86, 0.38);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.mode-select:focus-visible {
+  outline: 3px solid rgba(102, 128, 113, 0.28);
+  outline-offset: 3px;
 }
 
 .motion-note {

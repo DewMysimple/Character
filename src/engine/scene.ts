@@ -4,6 +4,7 @@ import {
   DESIGN_WIDTH,
   SCENE_DURATION,
   type Butterfly,
+  type CollapseMode,
   type Flower,
   type GlyphParticle,
   type PhysicsConfig,
@@ -47,6 +48,15 @@ const COLLAPSE_CENTER_X = DESIGN_WIDTH / 2;
 const COLLAPSE_CENTER_Y = 304;
 const FLOWER_ZONE_MIN_Y = 650;
 const FLOWER_ZONE_MAX_Y = 776;
+const CODE_START_X = 104;
+const CODE_START_Y = 104;
+const CODE_CHAR_STEP = 6.35;
+const CODE_LINE_STEP = 17;
+const MAX_CODE_COLUMN = Math.max(...CODE_LINES.map((line) => line.length - 1));
+const COLLAPSE_FOCUS_COLUMN = Math.round(MAX_CODE_COLUMN / 2);
+const COLLAPSE_FOCUS_LINE = 5;
+const COLLAPSE_FOCUS_X = CODE_START_X + COLLAPSE_FOCUS_COLUMN * CODE_CHAR_STEP;
+const COLLAPSE_FOCUS_Y = CODE_START_Y + COLLAPSE_FOCUS_LINE * CODE_LINE_STEP;
 
 export const STAGE_LABELS: Record<Stage, string> = {
   intro: "场景准备",
@@ -137,7 +147,7 @@ const drawCodeCard = (
       .map((glyph) => `${glyph.sourceLine}:${glyph.sourceColumn}`),
   );
   CODE_LINES.forEach((line, lineIndex) => {
-    const y = cardY + 42 + lineIndex * 17;
+    const y = cardY + 42 + lineIndex * CODE_LINE_STEP;
     context.fillStyle = "rgba(128, 120, 109, 0.56)";
     context.textAlign = "right";
     context.fillText(String(lineIndex + 31), cardX + 34, y);
@@ -149,7 +159,7 @@ const drawCodeCard = (
       if (missingGlyphs.has(`${lineIndex}:${characterIndex}`)) return;
       const color = CODE_PALETTE[(lineIndex * 7 + characterIndex) % CODE_PALETTE.length];
       context.fillStyle = character === " " ? "rgba(70, 68, 63, 0.52)" : color;
-      context.fillText(character, cardX + 50 + characterIndex * 6.35, y);
+      context.fillText(character, cardX + 50 + characterIndex * CODE_CHAR_STEP, y);
     });
   });
   context.restore();
@@ -355,6 +365,7 @@ export class SceneEngine {
   private flowers: Flower[] = [];
   private stems: StemSeed[] = [];
   private viewport = { width: DESIGN_WIDTH, height: DESIGN_HEIGHT };
+  private backgroundCanvas: HTMLCanvasElement | null = null;
 
   constructor(config: PhysicsConfig = DEFAULT_PHYSICS, seed = 47) {
     this.config = { ...config };
@@ -363,13 +374,18 @@ export class SceneEngine {
   }
 
   setViewport(width: number, height: number) {
+    if (width === this.viewport.width && height === this.viewport.height) return;
     this.viewport = { width, height };
+    this.backgroundCanvas = null;
   }
 
   setConfig(nextConfig: PhysicsConfig) {
     const particleCountChanged = nextConfig.particleCount !== this.config.particleCount;
+    const collapseChanged =
+      nextConfig.collapseMode !== this.config.collapseMode ||
+      nextConfig.collapseDuration !== this.config.collapseDuration;
     this.config = { ...nextConfig };
-    if (particleCountChanged) {
+    if (particleCountChanged || collapseChanged) {
       const currentTime = this.time;
       this.reset(this.seed);
       this.seek(currentTime);
@@ -383,6 +399,7 @@ export class SceneEngine {
     this.glyphs = [];
     this.butterflies = [];
     this.flowers = [];
+    this.backgroundCanvas = null;
     this.buildStems();
     this.buildFlowers();
     this.buildGlyphs();
@@ -426,13 +443,8 @@ export class SceneEngine {
     const height = this.viewport.height;
     context.clearRect(0, 0, width, height);
 
-    const paperGradient = context.createLinearGradient(0, 0, 0, height);
-    paperGradient.addColorStop(0, "#f4f0e7");
-    paperGradient.addColorStop(1, "#ebe7dc");
-    context.fillStyle = paperGradient;
-    context.fillRect(0, 0, width, height);
-
-    this.drawTexture(context, width, height);
+    if (!this.backgroundCanvas) this.buildBackground();
+    if (this.backgroundCanvas) context.drawImage(this.backgroundCanvas, 0, 0, width, height);
     drawCodeCard(context, this.time, this.glyphs);
     drawTitle(context, this.time);
     this.stems.forEach((stem) => drawStem(context, stem, this.time));
@@ -448,63 +460,71 @@ export class SceneEngine {
     this.glyphs.forEach((glyph) => {
       if (!glyph.active && this.time >= glyph.releaseAt) {
         glyph.active = true;
-        glyph.x = 54 + 50 + glyph.sourceColumn * 6.35;
-        glyph.y = 62 + 42 + glyph.sourceLine * 17;
-        const collapseTargetX =
-          COLLAPSE_CENTER_X + (seededRandom(glyph.seed + 21) - 0.5) * 22;
-        const collapseTargetY =
-          COLLAPSE_CENTER_Y + (seededRandom(glyph.seed + 22) - 0.5) * 14;
-        glyph.vx = (collapseTargetX - glyph.x) * 0.02 + (seededRandom(glyph.seed + 23) - 0.5) * 0.8;
-        glyph.vy = (collapseTargetY - glyph.y) * 0.02 + seededRandom(glyph.seed + 24) * 0.8;
+        glyph.x = CODE_START_X + glyph.sourceColumn * CODE_CHAR_STEP;
+        glyph.y = CODE_START_Y + glyph.sourceLine * CODE_LINE_STEP;
+        const collapseTarget = this.getCollapseTarget(glyph, 0);
+        glyph.vx =
+          (collapseTarget.x - glyph.x) * 0.02 +
+          (seededRandom(glyph.seed + 23) - 0.5) * 0.35;
+        glyph.vy = (collapseTarget.y - glyph.y) * 0.02 + seededRandom(glyph.seed + 24) * 0.3;
       }
       if (!glyph.active) return;
 
       const glyphAge = Math.max(0, this.time - glyph.releaseAt);
-      const collapseDuration = glyph.collapseAt - glyph.releaseAt;
+      const collapseDuration = Math.max(0.2, glyph.collapseAt - glyph.releaseAt);
       const inCollapse = glyphAge < collapseDuration;
-      const flutter = (seededRandom(glyph.seed + Math.floor(this.time * 18)) - 0.5) * 0.23;
+      const flutter = Math.sin(glyphAge * 18 + glyph.flutterPhase) * 0.23;
 
       if (inCollapse) {
-        const collapseTargetX =
-          COLLAPSE_CENTER_X + (seededRandom(glyph.seed + 21) - 0.5) * 22;
-        const collapseTargetY =
-          COLLAPSE_CENTER_Y + (seededRandom(glyph.seed + 22) - 0.5) * 14;
-        const collapseFade = 1 - clamp(glyphAge / collapseDuration, 0, 1);
-        const collapseSpring = 0.0048 + this.config.centerAttraction * 0.0045;
-        const swirl = Math.sin(glyphAge * 15 + glyph.seed) * 0.026 * collapseFade;
-        glyph.vx +=
-          ((collapseTargetX - glyph.x) * collapseSpring + swirl + this.config.wind * 0.00045) *
-          delta *
-          60;
-        glyph.vy +=
-          ((collapseTargetY - glyph.y) * collapseSpring + this.config.gravity * 0.018) *
-          delta *
-          60;
+        const collapseProgress = easeInOut(clamp(glyphAge / collapseDuration, 0, 1));
+        const collapseTarget = this.getCollapseTarget(glyph, collapseProgress);
+        const frameDelta = Math.max(1, delta * 60);
+        const follow = clamp(
+          (this.config.collapseMode === "local-collapse" ? 0.17 : 0.13) * frameDelta,
+          0,
+          0.28,
+        );
+        const swirl =
+          Math.sin(glyphAge * 15 + glyph.turbulencePhase) *
+          (this.config.collapseMode === "column-collapse" ? 0.012 : 0.02) *
+          (1 - collapseProgress);
+        const nextX = glyph.x + (collapseTarget.x - glyph.x) * follow + swirl;
+        const nextY = glyph.y + (collapseTarget.y - glyph.y) * follow;
+        glyph.vx = (nextX - glyph.x) / frameDelta;
+        glyph.vy = Math.max(0, (nextY - glyph.y) / frameDelta);
+        glyph.x = nextX;
+        glyph.y = nextY;
       } else {
         const exitProgress = clamp((glyphAge - collapseDuration) / 0.5, 0, 1);
         const centerPull =
           (COLLAPSE_CENTER_X - glyph.x) * this.config.centerAttraction * 0.0032;
         const dropAcceleration = this.config.gravity * (0.12 + exitProgress * 0.055);
-        const turbulence = Math.sin(glyphAge * 9 + glyph.seed) * 0.02;
+        const turbulence = Math.sin(glyphAge * 9 + glyph.turbulencePhase) * 0.02;
         glyph.vx +=
           (this.config.wind * 0.002 + centerPull + flutter * 0.014 + turbulence) * delta * 60;
         glyph.vy +=
-          (dropAcceleration + Math.cos(glyphAge * 7 + glyph.seed) * 0.022) * delta * 60;
+          (dropAcceleration + Math.cos(glyphAge * 7 + glyph.flutterPhase) * 0.022) * delta * 60;
+        glyph.vy = Math.max(0, glyph.vy);
       }
-      glyph.vx *= this.config.drag;
-      glyph.vy *= this.config.drag;
-      const glyphSpeed = Math.hypot(glyph.vx, glyph.vy);
-      if (glyphSpeed > 18) {
-        glyph.vx = (glyph.vx / glyphSpeed) * 18;
-        glyph.vy = (glyph.vy / glyphSpeed) * 18;
+      if (inCollapse) {
+        glyph.vx *= 0.96;
+        glyph.vy *= 0.98;
+      } else {
+        glyph.vx *= this.config.drag;
+        glyph.vy *= this.config.drag;
+        const glyphSpeed = Math.hypot(glyph.vx, glyph.vy);
+        if (glyphSpeed > 18) {
+          glyph.vx = (glyph.vx / glyphSpeed) * 18;
+          glyph.vy = (glyph.vy / glyphSpeed) * 18;
+        }
+        glyph.x += glyph.vx * delta * 60;
+        glyph.y += glyph.vy * delta * 60;
       }
-      glyph.x += glyph.vx * delta * 60;
-      glyph.y += glyph.vy * delta * 60;
       glyph.rotation += glyph.rotationSpeed * delta * 60;
 
       const enoughDropTime = glyphAge >= 1.05;
       const reachedFlowerZone = glyph.y >= glyph.morphThresholdY;
-      const safeFallback = this.time >= glyph.morphAt;
+      const safeFallback = this.time >= glyph.morphAt && glyph.y >= FLOWER_ZONE_MIN_Y - 70;
       if (glyph.stage !== "morphing" && enoughDropTime && (reachedFlowerZone || safeFallback)) {
         glyph.stage = "morphing";
         glyph.morphAt = this.time;
@@ -581,11 +601,15 @@ export class SceneEngine {
       const source = PARTICLE_POSITIONS[
         Math.min(PARTICLE_POSITIONS.length - 1, Math.floor((index * PARTICLE_POSITIONS.length) / count))
       ];
-      const sourceX = 54 + 50 + source.sourceColumn * 6.35;
-      const sourceY = 62 + 42 + source.sourceLine * 17;
-      const collapseDistance = Math.hypot(sourceX - COLLAPSE_CENTER_X, sourceY - COLLAPSE_CENTER_Y);
-      const collapseOrder = clamp(collapseDistance / 300, 0, 1);
-      const releaseAt = 1.12 + collapseOrder * 1.42 + seededRandom(seed) * 0.08;
+      const collapseOrder = this.getCollapseOrder(source, this.config.collapseMode);
+      const releaseJitter =
+        this.config.collapseMode === "column-collapse"
+          ? seededRandom(this.seed + source.sourceColumn * 7.13) * 0.045
+          : seededRandom(seed) * 0.08;
+      const releaseAt =
+        (this.config.collapseMode === "local-collapse" ? 1.24 : 1.18) +
+        collapseOrder * (this.config.collapseMode === "local-collapse" ? 2.25 : 1.5) +
+        releaseJitter;
       this.glyphs.push({
         id: index,
         char: source.char,
@@ -599,10 +623,19 @@ export class SceneEngine {
         alpha: 0,
         stage: "intro",
         releaseAt,
-        collapseAt: releaseAt + 0.38 + seededRandom(seed + 6) * 0.14,
-        morphAt: releaseAt + 2.45 + seededRandom(seed + 7) * 0.3,
+        collapseAt: releaseAt + this.config.collapseDuration,
+        morphAt:
+          releaseAt +
+          this.config.collapseDuration +
+          2.15 +
+          seededRandom(seed + 7) * 0.38,
         morphThresholdY:
           FLOWER_ZONE_MIN_Y + seededRandom(seed + 8) * (FLOWER_ZONE_MAX_Y - FLOWER_ZONE_MIN_Y),
+        collapseGroup: source.sourceColumn,
+        collapseOffsetX: (seededRandom(seed + 21) - 0.5) * 22,
+        collapseOffsetY: (seededRandom(seed + 22) - 0.5) * 14,
+        flutterPhase: seededRandom(seed + 23) * Math.PI * 2,
+        turbulencePhase: seededRandom(seed + 24) * Math.PI * 2,
         morphProgress: 0,
         seed,
         sourceLine: source.sourceLine,
@@ -611,6 +644,83 @@ export class SceneEngine {
         flowerLinked: false,
       });
     }
+  }
+
+  private getCollapseOrder(
+    source: { sourceLine: number; sourceColumn: number },
+    mode: CollapseMode,
+  ) {
+    const centeredColumnDistance =
+      Math.abs(source.sourceColumn - MAX_CODE_COLUMN / 2) / Math.max(1, MAX_CODE_COLUMN / 2);
+    const rowProgress = source.sourceLine / Math.max(1, CODE_LINES.length - 1);
+
+    if (mode === "local-collapse") {
+      const columnDistance = Math.abs(source.sourceColumn - COLLAPSE_FOCUS_COLUMN);
+      const rowDistance = Math.abs(source.sourceLine - COLLAPSE_FOCUS_LINE) * 2.65;
+      const localDistance = Math.hypot(columnDistance, rowDistance);
+      const maxDistance = Math.max(
+        Math.hypot(COLLAPSE_FOCUS_COLUMN, COLLAPSE_FOCUS_LINE * 2.65),
+        Math.hypot(MAX_CODE_COLUMN - COLLAPSE_FOCUS_COLUMN, (CODE_LINES.length - 1 - COLLAPSE_FOCUS_LINE) * 2.65),
+      );
+      return clamp((localDistance - 1.2) / Math.max(1, maxDistance - 1.2), 0, 1);
+    }
+    if (mode === "column-collapse") return clamp(centeredColumnDistance, 0, 1);
+    if (mode === "wave-collapse") {
+      return clamp(centeredColumnDistance * 0.68 + rowProgress * 0.32, 0, 1);
+    }
+
+    const sourceX = CODE_START_X + source.sourceColumn * CODE_CHAR_STEP;
+    const sourceY = CODE_START_Y + source.sourceLine * CODE_LINE_STEP;
+    return clamp(
+      Math.hypot(sourceX - COLLAPSE_CENTER_X, sourceY - COLLAPSE_CENTER_Y) / 300,
+      0,
+      1,
+    );
+  }
+
+  private getCollapseTarget(glyph: GlyphParticle, progress: number) {
+    const sourceX = CODE_START_X + glyph.sourceColumn * CODE_CHAR_STEP;
+    const sourceY = CODE_START_Y + glyph.sourceLine * CODE_LINE_STEP;
+    const columnDrift = (COLLAPSE_CENTER_X - sourceX) * 0.12;
+
+    if (this.config.collapseMode === "local-collapse") {
+      return {
+        x:
+          sourceX +
+          (COLLAPSE_FOCUS_X - sourceX) * 0.76 * progress +
+          glyph.collapseOffsetX * 0.08 * progress,
+        y:
+          sourceY +
+          (COLLAPSE_FOCUS_Y - sourceY) * 0.76 * progress +
+          92 * progress,
+      };
+    }
+
+    if (this.config.collapseMode === "column-collapse") {
+      return {
+        x: sourceX + columnDrift * progress + glyph.collapseOffsetX * 0.07 * progress,
+        y: sourceY + 118 * progress + glyph.sourceLine * 2.2 * progress,
+      };
+    }
+
+    if (this.config.collapseMode === "wave-collapse") {
+      const waveOffset = Math.sin(glyph.sourceColumn * 0.5 + glyph.sourceLine * 0.8) * 18;
+      return {
+        x:
+          COLLAPSE_CENTER_X +
+          waveOffset * (1 - progress) +
+          (sourceX - COLLAPSE_CENTER_X) * 0.08,
+        y:
+          COLLAPSE_CENTER_Y +
+          (sourceY - COLLAPSE_CENTER_Y) * 0.12 +
+          waveOffset * 0.12 * progress,
+      };
+    }
+
+    return {
+      x: COLLAPSE_CENTER_X + glyph.collapseOffsetX,
+      y: COLLAPSE_CENTER_Y + glyph.collapseOffsetY,
+    };
   }
 
   private buildStems() {
@@ -727,5 +837,21 @@ export class SceneEngine {
       context.fill();
     }
     context.restore();
+  }
+
+  private buildBackground() {
+    const background = document.createElement("canvas");
+    background.width = Math.ceil(this.viewport.width);
+    background.height = Math.ceil(this.viewport.height);
+    const context = background.getContext("2d");
+    if (!context) return;
+
+    const paperGradient = context.createLinearGradient(0, 0, 0, this.viewport.height);
+    paperGradient.addColorStop(0, "#f4f0e7");
+    paperGradient.addColorStop(1, "#ebe7dc");
+    context.fillStyle = paperGradient;
+    context.fillRect(0, 0, this.viewport.width, this.viewport.height);
+    this.drawTexture(context, this.viewport.width, this.viewport.height);
+    this.backgroundCanvas = background;
   }
 }

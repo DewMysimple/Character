@@ -1,5 +1,5 @@
 import { STAGE_LABELS } from "../engine/scene";
-import type { PhysicsConfig, SceneSnapshot } from "../engine/types";
+import type { CollapseMode, PhysicsConfig, SceneSnapshot } from "../engine/types";
 
 interface ControlPanelProps {
   config: PhysicsConfig;
@@ -88,6 +88,10 @@ export function ControlPanel({
       </div>
 
       <div className="parameters-grid">
+        <CollapseModeControl
+          value={config.collapseMode}
+          onChange={(value) => onConfigChange("collapseMode", value)}
+        />
         <Parameter
           label="播放速度"
           value={config.speed}
@@ -125,10 +129,19 @@ export function ControlPanel({
           onChange={(value) => onConfigChange("centerAttraction", value)}
         />
         <Parameter
+          label="坍塌时长"
+          value={config.collapseDuration}
+          min={0.7}
+          max={2.4}
+          step={0.05}
+          display={`${formatValue(config.collapseDuration)}s`}
+          onChange={(value) => onConfigChange("collapseDuration", value)}
+        />
+        <Parameter
           label="变形时长"
           value={config.morphDuration}
-          min={0.2}
-          max={1.2}
+          min={0.45}
+          max={1.8}
           step={0.05}
           display={`${formatValue(config.morphDuration)}s`}
           onChange={(value) => onConfigChange("morphDuration", value)}
@@ -136,8 +149,8 @@ export function ControlPanel({
         <Parameter
           label="字符数量"
           value={config.particleCount}
-          min={60}
-          max={220}
+          min={120}
+          max={480}
           step={10}
           display={String(config.particleCount)}
           onChange={(value) => onConfigChange("particleCount", value)}
@@ -153,8 +166,35 @@ export function ControlPanel({
         />
       </div>
 
-      <p className="motion-note">文字先在卡片中央塌陷，再掉入花丛附近变成蝴蝶。扇翅频率可实时调节。</p>
+      <p className="motion-note">同列文字先形成缺口，再像建筑坍方一样分层下落，接近花丛后才变成蝴蝶。</p>
     </aside>
+  );
+}
+
+interface CollapseModeControlProps {
+  value: CollapseMode;
+  onChange: (value: CollapseMode) => void;
+}
+
+function CollapseModeControl({ value, onChange }: CollapseModeControlProps) {
+  return (
+    <label className="parameter-control parameter-control-wide">
+      <span className="parameter-topline">
+        <span>文字变化形式</span>
+        <output>实时</output>
+      </span>
+      <select
+        className="mode-select"
+        value={value}
+        onChange={(event) => onChange(event.target.value as CollapseMode)}
+        aria-label="文字变化形式"
+      >
+        <option value="local-collapse">局部扩散</option>
+        <option value="column-collapse">同列坍方</option>
+        <option value="center-collapse">中心聚拢</option>
+        <option value="wave-collapse">波纹塌落</option>
+      </select>
+    </label>
   );
 }
 
