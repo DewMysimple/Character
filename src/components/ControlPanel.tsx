@@ -383,7 +383,7 @@ function CollapseModeControl({ value, onChange }: CollapseModeControlProps) {
         aria-label="文字变化形式"
       >
         <option value="local-collapse">局部扩散</option>
-        <option value="column-collapse">同列坍方</option>
+        <option value="column-collapse">同列坍方（整列缺口）</option>
         <option value="center-collapse">中心聚拢</option>
         <option value="wave-collapse">波纹塌落</option>
       </select>

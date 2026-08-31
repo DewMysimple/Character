@@ -57,6 +57,25 @@ const CODE_LINE_STEP = 17;
 const MAX_CODE_COLUMN = Math.max(...CODE_LINES.map((line) => line.length - 1));
 const COLLAPSE_FOCUS_COLUMN = Math.round(MAX_CODE_COLUMN / 2);
 const COLLAPSE_FOCUS_LINE = 5;
+const COLUMN_COLLAPSE_CORE_RADIUS = 2;
+const COLUMN_COLLAPSE_GROUP_WIDTH = 4;
+
+type ParticleSource = (typeof PARTICLE_POSITIONS)[number];
+type ParticleSourcePlan = {
+  source: ParticleSource;
+  collapsible: boolean;
+};
+
+const getColumnCollapseGroup = (sourceColumn: number) => {
+  const distance = Math.abs(sourceColumn - COLLAPSE_FOCUS_COLUMN);
+  if (distance <= COLUMN_COLLAPSE_CORE_RADIUS) return 0;
+  return (
+    1 +
+    Math.floor(
+      (distance - COLUMN_COLLAPSE_CORE_RADIUS - 1) / COLUMN_COLLAPSE_GROUP_WIDTH,
+    )
+  );
+};
 
 export const STAGE_LABELS: Record<Stage, string> = {
   intro: "场景准备",
@@ -494,24 +513,40 @@ export class SceneEngine {
         glyph.active = true;
         glyph.x = CODE_START_X + glyph.sourceColumn * CODE_CHAR_STEP;
         glyph.y = CODE_START_Y + glyph.sourceLine * CODE_LINE_STEP;
-        glyph.vx = (seededRandom(glyph.seed + 23) - 0.5) * 0.35;
-        glyph.vy = seededRandom(glyph.seed + 24) * 0.3;
+        glyph.vx =
+          this.config.collapseMode === "column-collapse"
+            ? (seededRandom(this.seed + glyph.sourceColumn * 2.61 + 41) - 0.5) * 0.08
+            : (seededRandom(glyph.seed + 23) - 0.5) * 0.35;
+        glyph.vy =
+          this.config.collapseMode === "column-collapse"
+            ? 0.06 + seededRandom(this.seed + glyph.sourceColumn * 3.17 + 91) * 0.05
+            : seededRandom(glyph.seed + 24) * 0.3;
       }
       if (!glyph.active) return;
 
       const glyphAge = Math.max(0, this.time - glyph.releaseAt);
-      const flutter = Math.sin(glyphAge * 18 + glyph.flutterPhase) * 0.23;
+      const isColumnCollapse = this.config.collapseMode === "column-collapse";
+      const flutter = isColumnCollapse
+        ? Math.sin(glyphAge * 4.5 + glyph.sourceColumn * 0.63) * 0.14
+        : Math.sin(glyphAge * 18 + glyph.flutterPhase) * 0.23;
 
       const centerDrift =
         this.config.collapseMode === "center-collapse"
           ? (COLLAPSE_CENTER_X - glyph.x) * this.config.centerAttraction * 0.00045
           : 0;
-      const turbulence = Math.sin(glyphAge * 9 + glyph.turbulencePhase) * 0.02;
+      const turbulence = isColumnCollapse
+        ? Math.sin(glyphAge * 3.8 + glyph.sourceColumn * 0.47) * 0.008
+        : Math.sin(glyphAge * 9 + glyph.turbulencePhase) * 0.02;
       const dropAcceleration = this.config.gravity * (0.18 + clamp(glyphAge / 1.6, 0, 1) * 0.045);
+      const verticalJitter = isColumnCollapse
+        ? Math.sin(glyphAge * 4.2 + glyph.sourceColumn * 0.54) * 0.004
+        : Math.cos(glyphAge * 7 + glyph.flutterPhase) * 0.022;
       glyph.vx +=
-        (this.config.wind * 0.002 + centerDrift + flutter * 0.014 + turbulence) * delta * 60;
+        (this.config.wind * 0.002 + centerDrift + flutter * (isColumnCollapse ? 0.004 : 0.014) + turbulence) *
+        delta *
+        60;
       glyph.vy +=
-        (dropAcceleration + Math.cos(glyphAge * 7 + glyph.flutterPhase) * 0.022) * delta * 60;
+        (dropAcceleration + verticalJitter) * delta * 60;
       glyph.vy = Math.max(0, glyph.vy);
       glyph.vx *= this.config.drag;
       glyph.vy *= this.config.drag;
@@ -673,20 +708,27 @@ export class SceneEngine {
 
   private buildGlyphs() {
     const count = Math.round(this.config.particleCount);
+    const sources = this.getParticleSources(count, this.config.collapseMode);
     for (let index = 0; index < count; index += 1) {
       const seed = this.seed + index * 17.31;
-      const source = PARTICLE_POSITIONS[
-        Math.min(PARTICLE_POSITIONS.length - 1, Math.floor((index * PARTICLE_POSITIONS.length) / count))
-      ];
+      const sourcePlan = sources[index];
+      const source = sourcePlan.source;
       const collapseOrder = this.getCollapseOrder(source, this.config.collapseMode);
       const releaseJitter =
         this.config.collapseMode === "column-collapse"
-          ? seededRandom(this.seed + source.sourceColumn * 7.13) * 0.045
+          ? 0
           : seededRandom(seed) * 0.08;
-      const releaseAt =
-        (this.config.collapseMode === "local-collapse" ? 1.24 : 1.18) +
-        collapseOrder * (this.config.collapseMode === "local-collapse" ? 2.25 : 1.5) +
-        releaseJitter;
+      const releaseSpan =
+        this.config.collapseMode === "local-collapse"
+          ? this.config.collapseDuration * 1.6
+          : this.config.collapseMode === "column-collapse"
+            ? Math.max(0.45, this.config.collapseDuration * 0.95)
+            : 1.5;
+      const releaseAt = sourcePlan.collapsible
+        ? (this.config.collapseMode === "local-collapse" ? 1.24 : 1.18) +
+          collapseOrder * releaseSpan +
+          releaseJitter
+        : Number.POSITIVE_INFINITY;
       this.glyphs.push({
         id: index,
         char: source.char,
@@ -700,10 +742,9 @@ export class SceneEngine {
         alpha: 0,
         stage: "intro",
         releaseAt,
-        morphAt:
-          releaseAt +
-          1.85 +
-          seededRandom(seed + 7) * 0.38,
+        morphAt: sourcePlan.collapsible
+          ? releaseAt + 1.85 + seededRandom(seed + 7) * 0.38
+          : Number.POSITIVE_INFINITY,
         morphThresholdY:
           FLOWER_ZONE_MIN_Y + seededRandom(seed + 8) * (FLOWER_ZONE_MAX_Y - FLOWER_ZONE_MIN_Y),
         flutterPhase: seededRandom(seed + 23) * Math.PI * 2,
@@ -736,7 +777,15 @@ export class SceneEngine {
       );
       return clamp((localDistance - 1.2) / Math.max(1, maxDistance - 1.2), 0, 1);
     }
-    if (mode === "column-collapse") return clamp(centeredColumnDistance, 0, 1);
+    if (mode === "column-collapse") {
+      const group = getColumnCollapseGroup(source.sourceColumn);
+      const maxDistance = Math.max(
+        COLLAPSE_FOCUS_COLUMN,
+        MAX_CODE_COLUMN - COLLAPSE_FOCUS_COLUMN,
+      );
+      const maxGroup = getColumnCollapseGroup(COLLAPSE_FOCUS_COLUMN - maxDistance);
+      return clamp(group / Math.max(1, maxGroup), 0, 1);
+    }
     if (mode === "wave-collapse") {
       return clamp(centeredColumnDistance * 0.68 + rowProgress * 0.32, 0, 1);
     }
@@ -747,6 +796,64 @@ export class SceneEngine {
       Math.hypot(sourceX - COLLAPSE_CENTER_X, sourceY - COLLAPSE_CENTER_Y) / 300,
       0,
       1,
+    );
+  }
+
+  private getParticleSources(count: number, mode: CollapseMode): ParticleSourcePlan[] {
+    const sampledSources = Array.from({ length: count }, (_, index) => ({
+      source:
+        PARTICLE_POSITIONS[
+          Math.min(
+            PARTICLE_POSITIONS.length - 1,
+            Math.floor((index * PARTICLE_POSITIONS.length) / count),
+          )
+        ],
+      collapsible: true,
+    }));
+    if (mode !== "column-collapse") return sampledSources;
+
+    const groupedSources = new Map<number, ParticleSource[]>();
+    PARTICLE_POSITIONS.forEach((source) => {
+      const group = getColumnCollapseGroup(source.sourceColumn);
+      const groupSources = groupedSources.get(group) ?? [];
+      groupSources.push(source);
+      groupedSources.set(group, groupSources);
+    });
+
+    const selectedSources: ParticleSourcePlan[] = [];
+    const selectedKeys = new Set<string>();
+    const groupIds = [...groupedSources.keys()].sort((first, second) => first - second);
+    for (const group of groupIds) {
+      const groupSources = groupedSources.get(group) ?? [];
+      if (selectedSources.length + groupSources.length > count) break;
+      groupSources.forEach((source) => {
+        selectedSources.push({ source, collapsible: true });
+        selectedKeys.add(`${source.sourceLine}:${source.sourceColumn}`);
+      });
+    }
+
+    const staticSources = PARTICLE_POSITIONS.filter(
+      (source) => !selectedKeys.has(`${source.sourceLine}:${source.sourceColumn}`),
+    );
+    const staticCount = Math.min(count - selectedSources.length, staticSources.length);
+    for (let index = 0; index < staticCount; index += 1) {
+      selectedSources.push({
+        source: staticSources[Math.floor((index * staticSources.length) / staticCount)],
+        collapsible: false,
+      });
+    }
+
+    while (selectedSources.length < count) {
+      selectedSources.push({
+        source: PARTICLE_POSITIONS[selectedSources.length % PARTICLE_POSITIONS.length],
+        collapsible: false,
+      });
+    }
+
+    return selectedSources.sort(
+      (first, second) =>
+        first.source.sourceLine - second.source.sourceLine ||
+        first.source.sourceColumn - second.source.sourceColumn,
     );
   }
 
