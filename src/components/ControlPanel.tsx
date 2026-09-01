@@ -331,13 +331,31 @@ export function ControlPanel({
               onChange={(value) => onConfigChange("butterflyOrbitDrift", value)}
             />
             <Parameter
-              label="花朵跟随"
+              label="花朵吸引"
               value={config.butterflyFlowerAttraction}
               min={0.15}
               max={1.8}
               step={0.05}
               display={formatValue(config.butterflyFlowerAttraction)}
               onChange={(value) => onConfigChange("butterflyFlowerAttraction", value)}
+            />
+            <Parameter
+              label="驻花时长"
+              value={config.butterflyVisitDuration}
+              min={2}
+              max={10}
+              step={0.5}
+              display={`${formatValue(config.butterflyVisitDuration, 1)}s`}
+              onChange={(value) => onConfigChange("butterflyVisitDuration", value)}
+            />
+            <Parameter
+              label="群体避让"
+              value={config.butterflySeparation}
+              min={0}
+              max={1.5}
+              step={0.05}
+              display={formatValue(config.butterflySeparation)}
+              onChange={(value) => onConfigChange("butterflySeparation", value)}
             />
             <Parameter
               label="飞行速度"
@@ -488,11 +506,11 @@ function FlowerOrbitModeControl() {
     <div className="parameter-control parameter-control-wide mode-lock" aria-label="当前蝴蝶飞行模式">
       <span className="parameter-topline">
         <span>飞行模式</span>
-        <output>固定</output>
+        <output>生态</output>
       </span>
       <div className="mode-lock-value">
-        <strong>围绕花朵飞行</strong>
-        <span>每只蝴蝶跟随自己的花头</span>
+        <strong>生态访花</strong>
+        <span>接近、环绕、悬停，再转访邻花</span>
       </div>
     </div>
   );

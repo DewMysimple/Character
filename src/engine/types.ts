@@ -11,6 +11,7 @@ export type CollapseMode =
   | "column-collapse"
   | "center-collapse"
   | "wave-collapse";
+export type ButterflyFlightMode = "approach" | "orbit" | "hover" | "transfer";
 export interface PhysicsConfig {
   gravity: number;
   wind: number;
@@ -37,6 +38,8 @@ export interface PhysicsConfig {
   butterflyOrbitWobble: number;
   butterflyOrbitDrift: number;
   butterflyFlowerAttraction: number;
+  butterflyVisitDuration: number;
+  butterflySeparation: number;
   butterflyFlightSpeed: number;
   butterflyScale: number;
   pointerInteractionEnabled: boolean;
@@ -100,7 +103,9 @@ export interface Butterfly {
   birthTime: number;
   color: string;
   seed: number;
+  homeFlowerId: number;
   targetFlowerId: number;
+  previousFlowerId: number;
   flowerX: number;
   flowerY: number;
   flowerOffsetX: number;
@@ -110,6 +115,14 @@ export interface Butterfly {
   orbitHeight: number;
   flightPhase: number;
   wingPhase: number;
+  flightMode: ButterflyFlightMode;
+  stateStartedAt: number;
+  stateUntil: number;
+  orbitDirection: -1 | 1;
+  hoverOffsetX: number;
+  hoverOffsetY: number;
+  visitCount: number;
+  pointerEvading: boolean;
   flowerLinked: boolean;
 }
 
@@ -174,6 +187,8 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   butterflyOrbitWobble: 0.18,
   butterflyOrbitDrift: 0.45,
   butterflyFlowerAttraction: 0.72,
+  butterflyVisitDuration: 5.5,
+  butterflySeparation: 0.85,
   butterflyFlightSpeed: 1,
   butterflyScale: 1,
   pointerInteractionEnabled: true,

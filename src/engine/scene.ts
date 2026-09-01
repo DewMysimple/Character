@@ -4,6 +4,7 @@ import {
   DESIGN_WIDTH,
   SCENE_DURATION,
   type Butterfly,
+  type ButterflyFlightMode,
   type CollapseMode,
   type Flower,
   type GlyphParticle,
@@ -96,6 +97,10 @@ const BLUR_GHOSTS = 2;
 const PHYSICS_DT = 1 / 180;
 const AGENT_DT = 1 / 60;
 const MAX_PHYSICS_STEPS = 48;
+const BUTTERFLY_SAFE_MARGIN_X = 34;
+const BUTTERFLY_SAFE_TOP = BUTTERFLY_ZONE_TOP - 74;
+const BUTTERFLY_SAFE_BOTTOM = DESIGN_HEIGHT - 96;
+const BUTTERFLY_SEPARATION_RADIUS = 26;
 
 type ParticleSource = (typeof PARTICLE_POSITIONS)[number];
 type ParticleSourcePlan = {
@@ -485,6 +490,7 @@ export class SceneEngine {
   private backgroundCanvas: HTMLCanvasElement | null = null;
   private pointer: ScenePointer | null = null;
   private accumulator = 0;
+  private agentAccumulator = 0;
   private air: AirField;
   private erosionPhaseA = 0;
   private erosionPhaseB = 0;
@@ -531,6 +537,7 @@ export class SceneEngine {
     this.time = 0;
     this.motionTime = 0;
     this.accumulator = 0;
+    this.agentAccumulator = 0;
     this.glyphs = [];
     this.butterflies = [];
     this.flowers = [];
@@ -549,25 +556,18 @@ export class SceneEngine {
       return;
     }
 
-    // Scrubbing replays glyphs with the same fixed step live playback uses, so
-    // seeking to t and playing to t land on the same state. Agents are
-    // kinematic and batch at frame rate, exactly as they do live.
+    // Scrubbing replays both physical layers with the same fixed steps used by
+    // live playback, so butterfly state changes do not depend on refresh rate.
     this.reset(this.seed);
     let remaining = target;
-    let agentDelta = 0;
     while (remaining > 0) {
       const step = Math.min(PHYSICS_DT, remaining);
       this.time = clamp(this.time + step, 0, SCENE_DURATION);
       this.motionTime += step;
       this.stepGlyphs(step);
+      this.advanceAgents(step);
       remaining -= step;
-      agentDelta += step;
-      if (agentDelta >= AGENT_DT) {
-        this.stepAgents(agentDelta);
-        agentDelta = 0;
-      }
     }
-    if (agentDelta > 0) this.stepAgents(agentDelta);
   }
 
   advance(realDelta: number) {
@@ -579,23 +579,27 @@ export class SceneEngine {
     // 180Hz. That also makes the result independent of the display refresh
     // rate, which per-frame damping never was.
     let steps = 0;
-    let motionDelta = 0;
     while (this.accumulator >= PHYSICS_DT && steps < MAX_PHYSICS_STEPS) {
       this.time = clamp(this.time + PHYSICS_DT, 0, SCENE_DURATION);
       this.motionTime += PHYSICS_DT;
-      motionDelta += PHYSICS_DT;
       this.stepGlyphs(PHYSICS_DT);
+      this.advanceAgents(PHYSICS_DT);
       this.accumulator -= PHYSICS_DT;
       steps += 1;
     }
     if (steps >= MAX_PHYSICS_STEPS) this.accumulator = 0;
 
-    // Butterflies and flowers are kinematic, so one update per frame is
-    // enough and keeps the substep cost off them.
-    // `time` intentionally stops at eight seconds, but `motionTime` and the
-    // living agents do not. Deriving this delta from the clamped scene clock
-    // used to freeze flower pointer response and butterfly orbits at 8.00s.
-    if (motionDelta > 0) this.stepAgents(motionDelta);
+    // `time` intentionally stops at eight seconds, while `motionTime` and the
+    // fixed 60Hz ecological layer continue indefinitely.
+  }
+
+  private advanceAgents(delta: number) {
+    this.agentAccumulator += delta;
+    while (this.agentAccumulator + 1e-10 >= AGENT_DT) {
+      this.stepAgents(AGENT_DT);
+      this.agentAccumulator -= AGENT_DT;
+      if (this.agentAccumulator < 0) this.agentAccumulator = 0;
+    }
   }
 
   /** Read-only access for the calibration harness. Not used by the app. */
@@ -714,58 +718,57 @@ export class SceneEngine {
   private stepAgents(delta: number) {
     this.updateFlowerPointer(delta);
 
-    const orbitSpeed = clamp(this.config.butterflyOrbitSpeed, 0.2, 2.4);
-    const tilt = (this.config.butterflyOrbitTilt * Math.PI) / 180;
-    const tiltCos = Math.cos(tilt);
-    const tiltSin = Math.sin(tilt);
     const pointer = this.config.pointerInteractionEnabled ? this.pointer : null;
     const pointerRadius = Math.max(1, this.config.butterflyPointerRadius);
     const pointerFalloff = Math.max(0.1, this.config.pointerFalloff);
+    const attraction = clamp(this.config.butterflyFlowerAttraction, 0.15, 1.8);
+    const orbitSpeed = clamp(this.config.butterflyOrbitSpeed, 0.2, 2.4);
+    const flightSpeedScale = clamp(this.config.butterflyFlightSpeed, 0.35, 1.8);
+    const tilt = (this.config.butterflyOrbitTilt * Math.PI) / 180;
+    const tiltCos = Math.cos(tilt);
+    const tiltSin = Math.sin(tilt);
+    const separationStrength = clamp(this.config.butterflySeparation, 0, 1.5);
+    const separation = this.computeButterflySeparation(separationStrength);
 
-    this.butterflies.forEach((butterfly) => {
+    this.butterflies.forEach((butterfly, index) => {
       const age = Math.max(0, this.motionTime - butterfly.birthTime);
-      butterfly.flightPhase += delta * 0.85 * orbitSpeed;
-      butterfly.wingPhase += delta * this.config.wingBeatFrequency * Math.PI * 2;
       this.updateButterflyFlightTarget(butterfly);
       butterfly.scale = butterfly.baseScale * this.config.butterflyScale;
-      const orbitCenterX = butterfly.targetX;
-      const orbitCenterY = butterfly.targetY;
-      const orbitRadius = this.config.butterflyOrbitRadius * butterfly.orbitRadius;
-      const orbitHeight = this.config.butterflyOrbitHeight * butterfly.orbitHeight;
-      const orbitWobble =
-        1 + Math.sin(age * 0.72 + butterfly.seed * 0.31) * this.config.butterflyOrbitWobble;
-      const orbitPhase = age * 1.16 * orbitSpeed + butterfly.flightPhase;
-      const verticalPhase = age * 1.37 * orbitSpeed + butterfly.flightPhase * 0.77;
-      const localX = Math.sin(orbitPhase) * orbitRadius * orbitWobble;
-      const localY = Math.cos(verticalPhase) * orbitHeight * orbitWobble;
-      const tiltedX = localX * tiltCos - localY * tiltSin;
-      const tiltedY = localX * tiltSin + localY * tiltCos;
-      const wideDriftX =
-        Math.sin(age * 0.42 + butterfly.seed) * 12 * this.config.butterflyOrbitDrift;
-      const wideDriftY =
-        Math.cos(age * 0.36 + butterfly.seed * 0.7) * 10 * this.config.butterflyOrbitDrift;
-      const orbitX =
-        orbitCenterX +
-        wideDriftX +
-        tiltedX;
-      const orbitY =
-        orbitCenterY +
-        wideDriftY +
-        tiltedY;
-      const distanceX = orbitX - butterfly.x;
-      const distanceY = orbitY - butterfly.y;
+      butterfly.flightPhase += delta * (0.52 + orbitSpeed * 0.18);
+
+      const wingModeScale =
+        butterfly.flightMode === "transfer"
+          ? 1.12
+          : butterfly.flightMode === "hover"
+            ? 0.9
+            : 1;
+      butterfly.wingPhase +=
+        delta * this.config.wingBeatFrequency * wingModeScale * Math.PI * 2;
+
+      const toFlowerX = butterfly.targetX - butterfly.x;
+      const toFlowerY = butterfly.targetY - butterfly.y;
+      const flowerDistance = Math.hypot(toFlowerX, toFlowerY);
+      const orbitRadiusX = Math.max(
+        16,
+        this.config.butterflyOrbitRadius * butterfly.orbitRadius,
+      );
+      const orbitRadiusY = Math.max(
+        12,
+        this.config.butterflyOrbitHeight * butterfly.orbitHeight,
+      );
+
       let pointerInfluence = 0;
       let pointerDirectionX = 0;
       let pointerDirectionY = 0;
       if (pointer) {
-        const pointerDistanceX = butterfly.x - pointer.x;
-        const pointerDistanceY = butterfly.y - pointer.y;
-        const pointerDistance = Math.hypot(pointerDistanceX, pointerDistanceY);
+        const fromPointerX = butterfly.x - pointer.x;
+        const fromPointerY = butterfly.y - pointer.y;
+        const pointerDistance = Math.hypot(fromPointerX, fromPointerY);
         if (pointerDistance < pointerRadius) {
           pointerInfluence = (1 - pointerDistance / pointerRadius) ** pointerFalloff;
           if (pointerDistance > 0.001) {
-            pointerDirectionX = pointerDistanceX / pointerDistance;
-            pointerDirectionY = pointerDistanceY / pointerDistance;
+            pointerDirectionX = fromPointerX / pointerDistance;
+            pointerDirectionY = fromPointerY / pointerDistance;
           } else {
             const fallbackAngle = butterfly.seed * 0.37;
             pointerDirectionX = Math.cos(fallbackAngle);
@@ -773,51 +776,161 @@ export class SceneEngine {
           }
         }
       }
-      const drift = Math.cos(age * 2.7 + butterfly.seed) * 0.018;
-      const steering =
-        0.00022 +
-        this.config.butterflyFlowerAttraction * 0.0012 +
-        this.config.centerAttraction * 0.00004 +
-        this.config.butterflyPointerReturn * (1 - pointerInfluence) * 0.00082;
-      butterfly.vx +=
-        (distanceX * steering + drift + this.config.wind * 0.0012) * delta * 60;
-      butterfly.vy +=
-        (distanceY * steering + Math.sin(age * 2.2 + butterfly.seed) * 0.014) * delta * 60;
+
+      if (pointerInfluence > 0.001) {
+        butterfly.pointerEvading = true;
+        if (Number.isFinite(butterfly.stateUntil)) butterfly.stateUntil += delta;
+      } else if (butterfly.pointerEvading) {
+        butterfly.pointerEvading = false;
+        this.setButterflyMode(butterfly, "approach", Number.POSITIVE_INFINITY);
+      }
+
+      if (!butterfly.pointerEvading) {
+        if (
+          (butterfly.flightMode === "approach" || butterfly.flightMode === "transfer") &&
+          flowerDistance <= Math.max(orbitRadiusX, orbitRadiusY) * 1.32
+        ) {
+          this.beginButterflyOrbit(butterfly);
+        } else if (
+          butterfly.flightMode === "orbit" &&
+          this.motionTime >= butterfly.stateUntil
+        ) {
+          this.beginButterflyHover(butterfly);
+        } else if (
+          butterfly.flightMode === "hover" &&
+          this.motionTime >= butterfly.stateUntil
+        ) {
+          this.beginButterflyTransfer(butterfly);
+        }
+      }
+
+      let accelerationX = separation[index].x;
+      let accelerationY = separation[index].y;
+      let maxSpeed = 125 * flightSpeedScale;
+
+      if (butterfly.flightMode === "orbit") {
+        const relativeX = butterfly.x - butterfly.targetX;
+        const relativeY = butterfly.y - butterfly.targetY;
+        const localX = relativeX * tiltCos + relativeY * tiltSin;
+        const localY = -relativeX * tiltSin + relativeY * tiltCos;
+        const ellipseAngle = Math.atan2(localY / orbitRadiusY, localX / orbitRadiusX);
+        const orbitWobble =
+          1 +
+          Math.sin(butterfly.flightPhase + butterfly.seed * 0.31) *
+            this.config.butterflyOrbitWobble *
+            0.42;
+        const desiredLocalX = Math.cos(ellipseAngle) * orbitRadiusX * orbitWobble;
+        const desiredLocalY = Math.sin(ellipseAngle) * orbitRadiusY * orbitWobble;
+        const desiredOrbitX =
+          butterfly.targetX + desiredLocalX * tiltCos - desiredLocalY * tiltSin;
+        const desiredOrbitY =
+          butterfly.targetY + desiredLocalX * tiltSin + desiredLocalY * tiltCos;
+        const tangentLocalX = -Math.sin(ellipseAngle) * orbitRadiusX * butterfly.orbitDirection;
+        const tangentLocalY = Math.cos(ellipseAngle) * orbitRadiusY * butterfly.orbitDirection;
+        const tangentWorldX = tangentLocalX * tiltCos - tangentLocalY * tiltSin;
+        const tangentWorldY = tangentLocalX * tiltSin + tangentLocalY * tiltCos;
+        const tangentLength = Math.max(0.001, Math.hypot(tangentWorldX, tangentWorldY));
+        const tangentSpeed = 58 * orbitSpeed * flightSpeedScale;
+        const correctionScale = 1.75 + attraction * 0.8;
+        const driftAmount = this.config.butterflyOrbitDrift * 4.5;
+        const desiredVelocityX =
+          (tangentWorldX / tangentLength) * tangentSpeed +
+          (desiredOrbitX - butterfly.x) * correctionScale +
+          Math.sin(butterfly.flightPhase * 0.73 + butterfly.seed) * driftAmount;
+        const desiredVelocityY =
+          (tangentWorldY / tangentLength) * tangentSpeed +
+          (desiredOrbitY - butterfly.y) * correctionScale +
+          Math.cos(butterfly.flightPhase * 0.61 + butterfly.seed * 0.7) * driftAmount;
+        const response = 2.1 + attraction * 1.35;
+        accelerationX += (desiredVelocityX - butterfly.vx) * response;
+        accelerationY += (desiredVelocityY - butterfly.vy) * response;
+        maxSpeed = Math.max(48, tangentSpeed * 1.55);
+      } else if (butterfly.flightMode === "hover") {
+        const hoverDrift = this.config.butterflyOrbitDrift * 3.2;
+        const hoverTargetX =
+          butterfly.targetX +
+          butterfly.hoverOffsetX +
+          Math.sin(butterfly.flightPhase + butterfly.seed) * hoverDrift;
+        const hoverTargetY =
+          butterfly.targetY +
+          butterfly.hoverOffsetY +
+          Math.cos(butterfly.flightPhase * 0.82 + butterfly.seed) * hoverDrift;
+        const desiredVelocityX = clamp((hoverTargetX - butterfly.x) * 2.6, -38, 38);
+        const desiredVelocityY = clamp((hoverTargetY - butterfly.y) * 2.6, -38, 38);
+        accelerationX += (desiredVelocityX - butterfly.vx) * (3.4 + attraction);
+        accelerationY += (desiredVelocityY - butterfly.vy) * (3.4 + attraction);
+        maxSpeed = 42 * flightSpeedScale;
+      } else {
+        const isTransfer = butterfly.flightMode === "transfer";
+        const arrivalRadius = isTransfer ? 190 : 145;
+        const cruiseSpeed = (isTransfer ? 150 : 122) * flightSpeedScale;
+        const approachSpeed = cruiseSpeed * clamp(flowerDistance / arrivalRadius, 0.2, 1);
+        const inverseDistance = flowerDistance > 0.001 ? 1 / flowerDistance : 0;
+        const desiredVelocityX = toFlowerX * inverseDistance * approachSpeed;
+        const desiredVelocityY = toFlowerY * inverseDistance * approachSpeed;
+        const response =
+          2.45 +
+          attraction * 1.55 +
+          (butterfly.flightMode === "approach"
+            ? this.config.butterflyPointerReturn * 0.5
+            : 0);
+        accelerationX += (desiredVelocityX - butterfly.vx) * response;
+        accelerationY += (desiredVelocityY - butterfly.vy) * response;
+        maxSpeed = cruiseSpeed;
+      }
+
       if (pointerInfluence > 0) {
-        const repulsion = this.config.butterflyPointerRepulsion * pointerInfluence * 0.064;
-        butterfly.vx += pointerDirectionX * repulsion * delta * 60;
-        butterfly.vy += pointerDirectionY * repulsion * delta * 60;
+        const repulsion =
+          390 * this.config.butterflyPointerRepulsion * pointerInfluence;
+        const retainBehavior = 1 - pointerInfluence * 0.82;
+        accelerationX = accelerationX * retainBehavior + pointerDirectionX * repulsion;
+        accelerationY = accelerationY * retainBehavior + pointerDirectionY * repulsion;
+        maxSpeed = Math.max(maxSpeed, 175 * flightSpeedScale);
       }
-      // Normalised by delta so the damping does not get stronger on a
-      // high-refresh display the way a per-frame multiply would.
-      const flightDamping = 0.982 ** (delta * 60);
-      butterfly.vx *= flightDamping;
-      butterfly.vy *= flightDamping;
-      const flightSpeed = Math.hypot(butterfly.vx, butterfly.vy);
-      const maxFlightSpeed = 6.4 * this.config.butterflyFlightSpeed;
-      if (flightSpeed > maxFlightSpeed) {
-        butterfly.vx = (butterfly.vx / flightSpeed) * maxFlightSpeed;
-        butterfly.vy = (butterfly.vy / flightSpeed) * maxFlightSpeed;
+
+      accelerationX += this.config.wind * 7;
+      this.applyButterflyBoundarySteering(butterfly, (x, y) => {
+        accelerationX += x;
+        accelerationY += y;
+      });
+
+      const accelerationLength = Math.hypot(accelerationX, accelerationY);
+      const maxAcceleration = pointerInfluence > 0 ? 520 : 390;
+      if (accelerationLength > maxAcceleration) {
+        accelerationX = (accelerationX / accelerationLength) * maxAcceleration;
+        accelerationY = (accelerationY / accelerationLength) * maxAcceleration;
       }
-      butterfly.x += butterfly.vx * delta * 60;
-      butterfly.y += butterfly.vy * delta * 60;
-      const safeX = clamp(butterfly.x, 22, DESIGN_WIDTH - 22);
-      const safeY = clamp(butterfly.y, BUTTERFLY_ZONE_TOP - 86, DESIGN_HEIGHT - 92);
-      if (safeX !== butterfly.x) butterfly.vx = 0;
-      if (safeY !== butterfly.y) butterfly.vy = 0;
-      butterfly.x = safeX;
-      butterfly.y = safeY;
-      butterfly.rotation += butterfly.rotationSpeed * delta * 60 + butterfly.vx * 0.0006;
+
+      butterfly.vx += accelerationX * delta;
+      butterfly.vy += accelerationY * delta;
+      const damping = Math.exp(-0.16 * delta);
+      butterfly.vx *= damping;
+      butterfly.vy *= damping;
+      const speed = Math.hypot(butterfly.vx, butterfly.vy);
+      if (speed > maxSpeed) {
+        butterfly.vx = (butterfly.vx / speed) * maxSpeed;
+        butterfly.vy = (butterfly.vy / speed) * maxSpeed;
+      }
+
+      butterfly.x += butterfly.vx * delta;
+      butterfly.y += butterfly.vy * delta;
+      this.keepButterflyInEmergencyBounds(butterfly);
+
+      const headingSpeed = Math.hypot(butterfly.vx, butterfly.vy);
+      if (headingSpeed > 4) {
+        const desiredRotation = Math.atan2(butterfly.vy, butterfly.vx) + Math.PI / 2;
+        const turn = Math.atan2(
+          Math.sin(desiredRotation - butterfly.rotation),
+          Math.cos(desiredRotation - butterfly.rotation),
+        );
+        butterfly.rotation += turn * (1 - Math.exp(-5.2 * delta));
+      }
       butterfly.alpha = 0.9 * easeOutCubic(clamp(age / 0.34, 0, 1));
 
-      const flowerDistance = Math.hypot(
-        butterfly.flowerX - butterfly.x,
-        butterfly.flowerY - butterfly.y,
-      );
       if (!butterfly.flowerLinked && (flowerDistance < 112 || age > 1.65)) {
         butterfly.flowerLinked = true;
         this.activateFlower(
-          butterfly.targetFlowerId,
+          butterfly.homeFlowerId,
           this.time + 0.1 + seededRandom(butterfly.seed) * 0.15,
         );
       }
@@ -830,6 +943,161 @@ export class SceneEngine {
       flower.leafProgress = clamp((age - 0.42) / 1.35, 0, 1);
       flower.petalProgress = clamp((age - 0.92) / 1.08, 0, 1);
     });
+  }
+
+  private computeButterflySeparation(strength: number) {
+    const forces = this.butterflies.map(() => ({ x: 0, y: 0 }));
+    if (strength <= 0) return forces;
+
+    for (let first = 0; first < this.butterflies.length; first += 1) {
+      const left = this.butterflies[first];
+      if (left.alpha <= 0.04) continue;
+      for (let second = first + 1; second < this.butterflies.length; second += 1) {
+        const right = this.butterflies[second];
+        if (right.alpha <= 0.04) continue;
+        const distanceX = left.x - right.x;
+        const distanceY = left.y - right.y;
+        const distance = Math.hypot(distanceX, distanceY);
+        if (distance >= BUTTERFLY_SEPARATION_RADIUS) continue;
+        const fallbackAngle = (left.seed + right.seed) * 0.19;
+        const directionX = distance > 0.001 ? distanceX / distance : Math.cos(fallbackAngle);
+        const directionY = distance > 0.001 ? distanceY / distance : Math.sin(fallbackAngle);
+        const influence = (1 - distance / BUTTERFLY_SEPARATION_RADIUS) ** 2;
+        const force = influence * 210 * strength;
+        forces[first].x += directionX * force;
+        forces[first].y += directionY * force;
+        forces[second].x -= directionX * force;
+        forces[second].y -= directionY * force;
+      }
+    }
+    return forces;
+  }
+
+  private setButterflyMode(
+    butterfly: Butterfly,
+    mode: ButterflyFlightMode,
+    stateUntil: number,
+  ) {
+    butterfly.flightMode = mode;
+    butterfly.stateStartedAt = this.motionTime;
+    butterfly.stateUntil = stateUntil;
+  }
+
+  private beginButterflyOrbit(butterfly: Butterfly) {
+    butterfly.visitCount += 1;
+    const durationVariance =
+      0.75 + seededRandom(butterfly.seed + butterfly.visitCount * 41.7 + 72) * 0.5;
+    const duration = this.config.butterflyVisitDuration * durationVariance;
+    this.setButterflyMode(butterfly, "orbit", this.motionTime + duration);
+  }
+
+  private beginButterflyHover(butterfly: Butterfly) {
+    const visitSeed = butterfly.seed + butterfly.visitCount * 57.3;
+    const angle = seededRandom(visitSeed + 81) * Math.PI * 2;
+    const radius = 14 + seededRandom(visitSeed + 82) * 10;
+    butterfly.hoverOffsetX = Math.cos(angle) * radius;
+    butterfly.hoverOffsetY = Math.sin(angle) * radius * 0.72;
+    const duration = 0.8 + seededRandom(visitSeed + 83) * 0.8;
+    this.setButterflyMode(butterfly, "hover", this.motionTime + duration);
+  }
+
+  private beginButterflyTransfer(butterfly: Butterfly) {
+    const nextFlowerId = this.chooseNextFlower(butterfly);
+    if (nextFlowerId === butterfly.targetFlowerId) {
+      this.beginButterflyOrbit(butterfly);
+      return;
+    }
+    butterfly.previousFlowerId = butterfly.targetFlowerId;
+    butterfly.targetFlowerId = nextFlowerId;
+    butterfly.flowerOffsetX =
+      (seededRandom(butterfly.seed + butterfly.visitCount * 73.1 + 91) - 0.5) * 10;
+    this.setButterflyMode(butterfly, "transfer", Number.POSITIVE_INFINITY);
+    this.updateButterflyFlightTarget(butterfly);
+  }
+
+  private chooseNextFlower(butterfly: Butterfly) {
+    const occupancy = new Array(this.flowers.length).fill(0) as number[];
+    this.butterflies.forEach((candidate) => {
+      occupancy[candidate.targetFlowerId] += 1;
+    });
+
+    const transferRange = 180 + this.config.butterflyOrbitDrift * 90;
+    const currentX = butterfly.targetX;
+    const currentY = butterfly.targetY;
+    const candidates = this.flowers
+      .filter(
+        (flower) =>
+          flower.id !== butterfly.targetFlowerId &&
+          flower.id !== butterfly.previousFlowerId &&
+          flower.activated &&
+          flower.petalProgress >= 0.7,
+      )
+      .map((flower) => {
+        const head = getFlowerHeadPosition(
+          flower,
+          this.motionTime,
+          this.config.flowerWindStrength,
+        );
+        return {
+          id: flower.id,
+          distance: Math.hypot(head.x - currentX, head.y - currentY),
+        };
+      })
+      .sort((left, right) => left.distance - right.distance || left.id - right.id);
+
+    const nearby = candidates.filter(({ distance }) => distance <= transferRange).slice(0, 6);
+    const pool = nearby.length > 0 ? nearby : candidates.slice(0, 6);
+    if (pool.length === 0) return butterfly.targetFlowerId;
+
+    const weights = pool.map(
+      ({ id, distance }) => 1 / ((distance + 60) * (1 + occupancy[id] * 0.45)),
+    );
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    let selector =
+      seededRandom(butterfly.seed + butterfly.visitCount * 101.3 + 509) * totalWeight;
+    for (let index = 0; index < pool.length; index += 1) {
+      selector -= weights[index];
+      if (selector <= 0) return pool[index].id;
+    }
+    return pool[pool.length - 1].id;
+  }
+
+  private applyButterflyBoundarySteering(
+    butterfly: Butterfly,
+    addForce: (x: number, y: number) => void,
+  ) {
+    const boundaryBand = 68;
+    let forceX = 0;
+    let forceY = 0;
+    if (butterfly.x < BUTTERFLY_SAFE_MARGIN_X + boundaryBand) {
+      forceX += (BUTTERFLY_SAFE_MARGIN_X + boundaryBand - butterfly.x) * 4.8;
+    }
+    if (butterfly.x > DESIGN_WIDTH - BUTTERFLY_SAFE_MARGIN_X - boundaryBand) {
+      forceX -=
+        (butterfly.x - (DESIGN_WIDTH - BUTTERFLY_SAFE_MARGIN_X - boundaryBand)) * 4.8;
+    }
+    if (butterfly.y < BUTTERFLY_SAFE_TOP + boundaryBand) {
+      forceY += (BUTTERFLY_SAFE_TOP + boundaryBand - butterfly.y) * 4.8;
+    }
+    if (butterfly.y > BUTTERFLY_SAFE_BOTTOM - boundaryBand) {
+      forceY -= (butterfly.y - (BUTTERFLY_SAFE_BOTTOM - boundaryBand)) * 4.8;
+    }
+    addForce(forceX, forceY);
+  }
+
+  private keepButterflyInEmergencyBounds(butterfly: Butterfly) {
+    const minimumX = 12;
+    const maximumX = DESIGN_WIDTH - 12;
+    const minimumY = BUTTERFLY_ZONE_TOP - 92;
+    const maximumY = DESIGN_HEIGHT - 82;
+    if (butterfly.x < minimumX || butterfly.x > maximumX) {
+      butterfly.x = clamp(butterfly.x, minimumX, maximumX);
+      butterfly.vx *= -0.35;
+    }
+    if (butterfly.y < minimumY || butterfly.y > maximumY) {
+      butterfly.y = clamp(butterfly.y, minimumY, maximumY);
+      butterfly.vy *= -0.35;
+    }
   }
 
   private getStage(): Stage {
@@ -1151,7 +1419,7 @@ export class SceneEngine {
     const id = this.butterflies.length;
     const targetFlowerId = id % this.flowers.length;
     const targetFlower = this.flowers[targetFlowerId];
-    const flowerOffsetX = (seededRandom(glyph.seed + 13) - 0.5) * 24;
+    const flowerOffsetX = (seededRandom(glyph.seed + 13) - 0.5) * 10;
     const flowerX =
       targetFlower.x + targetFlower.sway * 0.45 + flowerOffsetX;
     const flowerY = targetFlower.groundY - targetFlower.height;
@@ -1159,15 +1427,17 @@ export class SceneEngine {
     // Hand over at the glyph's *projected* position, or a depth-shifted glyph
     // would jump at the moment it becomes a butterfly.
     const handover = projectGlyph(glyph);
-    // Glyph velocity is px/s; butterfly velocity is px per 60Hz frame.
-    const handoverVx = (glyph.vx / 60) * handover.scale;
-    const handoverVy = (glyph.vy / 60) * handover.scale;
+    // Both layers use px/s, so the handover preserves momentum without a
+    // frame-rate conversion. The butterfly keeps only a restrained fraction
+    // of the falling speed before steering toward its first flower.
+    const handoverVx = glyph.vx * handover.scale;
+    const handoverVy = glyph.vy * handover.scale;
     const butterfly: Butterfly = {
       id,
       x: handover.x,
       y: handover.y,
-      vx: handoverVx * 0.45 + (seededRandom(glyph.seed + 9) - 0.5) * 1.2,
-      vy: handoverVy * 0.08 + seededRandom(glyph.seed + 10) * 0.18,
+      vx: handoverVx * 0.32 + (seededRandom(glyph.seed + 9) - 0.5) * 48,
+      vy: handoverVy * 0.06 + seededRandom(glyph.seed + 10) * 8,
       rotation: glyph.rotation,
       rotationSpeed: (seededRandom(glyph.seed + 11) - 0.5) * 0.032,
       scale: baseScale * this.config.butterflyScale,
@@ -1176,7 +1446,9 @@ export class SceneEngine {
       birthTime: this.motionTime,
       color: glyph.color,
       seed: glyph.seed,
+      homeFlowerId: targetFlowerId,
       targetFlowerId,
+      previousFlowerId: -1,
       flowerX,
       flowerY,
       flowerOffsetX,
@@ -1186,6 +1458,14 @@ export class SceneEngine {
       orbitHeight: 0.78 + seededRandom(glyph.seed + 16) * 0.44,
       flightPhase: seededRandom(glyph.seed + 17) * Math.PI * 2,
       wingPhase: seededRandom(glyph.seed + 18) * Math.PI * 2,
+      flightMode: "approach",
+      stateStartedAt: this.motionTime,
+      stateUntil: Number.POSITIVE_INFINITY,
+      orbitDirection: seededRandom(glyph.seed + 19) < 0.5 ? -1 : 1,
+      hoverOffsetX: 0,
+      hoverOffsetY: 0,
+      visitCount: 0,
+      pointerEvading: false,
       flowerLinked: false,
     };
     this.updateButterflyFlightTarget(butterfly);

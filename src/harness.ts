@@ -266,6 +266,123 @@ function runChecks() {
     );
   }
 
+  // 11. Ecological flight should spend most of its time near flowers while
+  //     still producing staggered neighbour visits instead of fixed loops.
+  {
+    const engine = new SceneEngine({ ...DEFAULT_PHYSICS });
+    engine.seek(8);
+    let nearSamples = 0;
+    let totalSamples = 0;
+    let closePairs = 0;
+    let sampledPairs = 0;
+    let maxOccupancy = 0;
+    let maxStep = 0;
+    let previous = engine.debugButterflies().map(({ x, y }) => ({ x, y }));
+
+    for (let frame = 0; frame < 60 * 12; frame += 1) {
+      engine.advance(1 / 60);
+      const butterflies = engine.debugButterflies();
+      butterflies.forEach((butterfly, index) => {
+        maxStep = Math.max(
+          maxStep,
+          Math.hypot(butterfly.x - previous[index].x, butterfly.y - previous[index].y),
+        );
+      });
+      previous = butterflies.map(({ x, y }) => ({ x, y }));
+
+      if (frame % 30 !== 29) continue;
+      const occupancy = new Array(engine.debugFlowers().length).fill(0) as number[];
+      butterflies.forEach((butterfly) => {
+        occupancy[butterfly.targetFlowerId] += 1;
+        const distance = Math.hypot(
+          butterfly.x - butterfly.flowerX,
+          butterfly.y - butterfly.flowerY,
+        );
+        if (distance <= 135) nearSamples += 1;
+        totalSamples += 1;
+      });
+      maxOccupancy = Math.max(maxOccupancy, ...occupancy);
+      for (let first = 0; first < butterflies.length; first += 1) {
+        for (let second = first + 1; second < butterflies.length; second += 1) {
+          if (
+            Math.hypot(
+              butterflies[first].x - butterflies[second].x,
+              butterflies[first].y - butterflies[second].y,
+            ) < 10
+          ) {
+            closePairs += 1;
+          }
+          sampledPairs += 1;
+        }
+      }
+    }
+
+    const butterflies = engine.debugButterflies();
+    const switched = butterflies.filter(
+      (butterfly) => butterfly.visitCount >= 2 || butterfly.targetFlowerId !== butterfly.homeFlowerId,
+    ).length;
+    const nearRatio = nearSamples / Math.max(1, totalSamples);
+    const switchedRatio = switched / Math.max(1, butterflies.length);
+    const overlapRatio = closePairs / Math.max(1, sampledPairs);
+    record(
+      "ecological flower visits",
+      nearRatio >= 0.75 &&
+        switchedRatio >= 0.3 &&
+        maxOccupancy <= 10 &&
+        overlapRatio < 0.05 &&
+        maxStep < 7 &&
+        engine.getSnapshot().time === 8,
+      `${(nearRatio * 100).toFixed(1)}% near flowers, ${(switchedRatio * 100).toFixed(1)}% changed visits, max occupancy ${maxOccupancy}, ${(overlapRatio * 100).toFixed(2)}% overlaps, ${maxStep.toFixed(2)}px max step`,
+    );
+  }
+
+  // 12. The fixed 60Hz agent layer must agree across display refresh rates,
+  //     and pointer evasion must reacquire the same flower before resuming.
+  {
+    const slow = new SceneEngine({ ...DEFAULT_PHYSICS });
+    const fast = new SceneEngine({ ...DEFAULT_PHYSICS });
+    slow.seek(8);
+    fast.seek(8);
+    for (let frame = 0; frame < 60 * 8; frame += 1) slow.advance(1 / 60);
+    for (let frame = 0; frame < 144 * 8; frame += 1) fast.advance(1 / 144);
+    let maxDrift = 0;
+    let stateMismatches = 0;
+    slow.debugButterflies().forEach((butterfly, index) => {
+      const other = fast.debugButterflies()[index];
+      maxDrift = Math.max(maxDrift, Math.hypot(butterfly.x - other.x, butterfly.y - other.y));
+      if (
+        butterfly.flightMode !== other.flightMode ||
+        butterfly.targetFlowerId !== other.targetFlowerId
+      ) {
+        stateMismatches += 1;
+      }
+    });
+
+    const pointerEngine = new SceneEngine({ ...DEFAULT_PHYSICS });
+    pointerEngine.seek(8);
+    const target = pointerEngine.debugButterflies()[0];
+    const targetFlowerId = target.targetFlowerId;
+    pointerEngine.setPointer({ x: target.x, y: target.y });
+    for (let frame = 0; frame < 30; frame += 1) pointerEngine.advance(1 / 60);
+    pointerEngine.setPointer(null);
+    for (let frame = 0; frame < 60 * 4; frame += 1) pointerEngine.advance(1 / 60);
+    const recovered = pointerEngine.debugButterflies()[0];
+    const returnDistance = Math.hypot(
+      recovered.x - recovered.flowerX,
+      recovered.y - recovered.flowerY,
+    );
+    const returned =
+      recovered.targetFlowerId === targetFlowerId &&
+      (recovered.flightMode === "approach" || recovered.flightMode === "orbit") &&
+      returnDistance < 135;
+
+    record(
+      "agent determinism and pointer return",
+      maxDrift < 2 && stateMismatches === 0 && returned,
+      `${maxDrift.toFixed(3)}px 60/144 drift, ${stateMismatches} state mismatches, ${returnDistance.toFixed(1)}px pointer return (${recovered.flightMode})`,
+    );
+  }
+
   const pre = document.createElement("pre");
   pre.id = "checks";
   pre.textContent = lines.join("\n");
