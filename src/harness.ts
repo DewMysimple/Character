@@ -2,7 +2,14 @@
 // be captured headlessly and compared against the reference video stills.
 // Not referenced by the app; safe to delete once calibration is settled.
 import { SceneEngine } from "./engine/scene";
-import { DEFAULT_PHYSICS, DESIGN_HEIGHT, DESIGN_WIDTH } from "./engine/types";
+import {
+  DEFAULT_PHYSICS,
+  DESIGN_HEIGHT,
+  DESIGN_WIDTH,
+  PARTICLE_COUNT_DEFAULT,
+  PARTICLE_COUNT_MAX,
+  PARTICLE_COUNT_MIN,
+} from "./engine/types";
 
 const params = new URLSearchParams(location.search);
 const times = (params.get("t") ?? "1.4,2.0,2.6,3.2,4.0,5.0")
@@ -122,28 +129,34 @@ function runChecks() {
     record("column gap integrity", split === 0, `${split} columns with mixed release times`);
   }
 
-  // 7. Neighbouring glyphs must not release in lockstep, or the collapse reads
-  //    as rigid three-character batches.
+  // 7. Neighbouring selected glyphs on each source line must not release in
+  //    lockstep, or the collapse reads as rigid batches. Lower particle counts
+  //    do not necessarily select consecutive source columns, so compare the
+  //    actual selected neighbours instead of requiring column + 1.
   {
     const engine = new SceneEngine({ ...DEFAULT_PHYSICS });
-    const byKey = new Map<string, number>();
+    const byLine = new Map<number, Array<{ column: number; releaseAt: number }>>();
     engine.debugGlyphs().forEach((glyph) => {
       if (!Number.isFinite(glyph.releaseAt)) return;
-      byKey.set(`${glyph.sourceLine}:${glyph.sourceColumn}`, glyph.releaseAt);
+      const glyphs = byLine.get(glyph.sourceLine) ?? [];
+      glyphs.push({ column: glyph.sourceColumn, releaseAt: glyph.releaseAt });
+      byLine.set(glyph.sourceLine, glyphs);
     });
     let pairs = 0;
     let identical = 0;
-    byKey.forEach((releaseAt, key) => {
-      const [line, column] = key.split(":").map(Number);
-      const right = byKey.get(`${line}:${column + 1}`);
-      if (right === undefined) return;
-      pairs += 1;
-      if (Math.abs(right - releaseAt) < 0.008) identical += 1;
+    byLine.forEach((glyphs) => {
+      glyphs.sort((left, right) => left.column - right.column);
+      for (let index = 1; index < glyphs.length; index += 1) {
+        pairs += 1;
+        if (Math.abs(glyphs[index].releaseAt - glyphs[index - 1].releaseAt) < 0.008) {
+          identical += 1;
+        }
+      }
     });
     record(
       "neighbour de-batching",
-      identical / Math.max(1, pairs) < 0.05,
-      `${identical}/${pairs} adjacent pairs within 8ms`,
+      pairs > 0 && identical / pairs < 0.05,
+      `${identical}/${pairs} selected neighbour pairs within 8ms`,
     );
   }
 
@@ -167,6 +180,36 @@ function runChecks() {
       "frame cost",
       perFrame < 16.6,
       `${perFrame.toFixed(2)}ms/frame (advance + render, ${engine.getSnapshot().activeGlyphs} live glyphs)`,
+    );
+  }
+
+  // 9. The configured lower/default/upper particle counts must all create the
+  //    requested number of butterflies and finish the garden by 8 seconds.
+  {
+    const counts = [PARTICLE_COUNT_MIN, PARTICLE_COUNT_DEFAULT, PARTICLE_COUNT_MAX];
+    const results = counts.map((particleCount) => {
+      const engine = new SceneEngine({ ...DEFAULT_PHYSICS, particleCount });
+      engine.seek(8);
+      const flowers = engine.debugFlowers();
+      return {
+        particleCount,
+        butterflies: engine.getSnapshot().butterflies,
+        bloomed: flowers.filter((flower) => flower.petalProgress >= 0.999).length,
+        flowers: flowers.length,
+      };
+    });
+    const pass = results.every(
+      ({ particleCount, butterflies, bloomed, flowers }) =>
+        butterflies === particleCount && bloomed === flowers,
+    );
+    record(
+      "particle-count bounds",
+      pass,
+      results
+        .map(({ particleCount, butterflies, bloomed, flowers }) =>
+          `${particleCount}: ${butterflies} butterflies, ${bloomed}/${flowers} flowers`,
+        )
+        .join("; "),
     );
   }
 

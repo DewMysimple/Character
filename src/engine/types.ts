@@ -1,6 +1,9 @@
 export const SCENE_DURATION = 8;
 export const DESIGN_WIDTH = 720;
 export const DESIGN_HEIGHT = 960;
+export const PARTICLE_COUNT_DEFAULT = 160;
+export const PARTICLE_COUNT_MIN = PARTICLE_COUNT_DEFAULT - 60;
+export const PARTICLE_COUNT_MAX = PARTICLE_COUNT_DEFAULT + 60;
 
 export type Stage = "intro" | "falling" | "morphing" | "bloom";
 export type CollapseMode =
@@ -152,7 +155,7 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   morphDuration: 1.05,
   collapseDuration: 3.4,
   collapseMode: "local-collapse",
-  particleCount: 420,
+  particleCount: PARTICLE_COUNT_DEFAULT,
   speed: 1,
   terminalVelocity: 180,
   glyphTumble: 1,

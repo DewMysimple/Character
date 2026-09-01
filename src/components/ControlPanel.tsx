@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { STAGE_LABELS } from "../engine/scene";
+import { PARTICLE_COUNT_MAX, PARTICLE_COUNT_MIN } from "../engine/types";
 import type {
   CollapseMode,
   PhysicsConfig,
@@ -136,8 +137,8 @@ export function ControlPanel({
             <Parameter
               label="字符数量"
               value={config.particleCount}
-              min={120}
-              max={480}
+              min={PARTICLE_COUNT_MIN}
+              max={PARTICLE_COUNT_MAX}
               step={10}
               display={String(config.particleCount)}
               onChange={(value) => onConfigChange("particleCount", value)}
