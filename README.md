@@ -22,7 +22,7 @@ npm run dev
 - `src/engine/scene.ts`：固定随机种子的场景引擎、固定步长调度和 Canvas 绘制。
 - `src/engine/glyphPhysics.ts`：字形质量度量、无散度涡旋气流场和薄片气动积分。
 - `src/engine/math.ts`：共享的 `clamp`、固定种子随机和缓动函数。
-- `harness.html`：校准工装（仅开发服务器，不进入构建产物）。`?t=1.3,1.8,2.4&cols=3&scale=0.62` 抓帧与参考帧比对，`?check=1` 运行九项自动检查。
+- `harness.html`：校准工装（仅开发服务器，不进入构建产物）。`?t=1.3,1.8,2.4&cols=3&scale=0.62` 抓帧与参考帧比对，`?check=1` 运行十项自动检查，包含 8 秒后的蝴蝶持续环绕与指针扰动。
 - `src/components/AnimationCanvas.tsx`：高 DPI Canvas、ResizeObserver 和 requestAnimationFrame 生命周期。
 - `src/components/ControlPanel.tsx`：播放、时间轴、分组参数、蝴蝶轨道实验台、指针扰动实验台和恢复默认控制。
 - `src/App.tsx`：React 状态与动画引擎之间的控制层。

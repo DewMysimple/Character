@@ -213,6 +213,59 @@ function runChecks() {
     );
   }
 
+  // 10. The eight-second story clock may stop, but the living layer must keep
+  //     moving and accepting pointer input after the garden is complete.
+  {
+    const engine = new SceneEngine({ ...DEFAULT_PHYSICS });
+    engine.seek(8);
+    const before = engine.debugButterflies().map(({ x, y }) => ({ x, y }));
+    for (let frame = 0; frame < 60; frame += 1) engine.advance(1 / 60);
+    const maxTravel = engine.debugButterflies().reduce((maximum, butterfly, index) => {
+      const origin = before[index];
+      return Math.max(maximum, Math.hypot(butterfly.x - origin.x, butterfly.y - origin.y));
+    }, 0);
+
+    const pointerEngine = new SceneEngine({ ...DEFAULT_PHYSICS });
+    pointerEngine.seek(8);
+    const targetFlower = pointerEngine.debugFlowers()[0];
+    pointerEngine.setPointer({
+      x: targetFlower.x + targetFlower.sway * 0.45 - 50,
+      y: targetFlower.groundY - targetFlower.height,
+    });
+    for (let frame = 0; frame < 30; frame += 1) pointerEngine.advance(1 / 60);
+    const maxPointerOffset = pointerEngine.debugFlowers().reduce(
+      (maximum, flower) => Math.max(maximum, Math.abs(flower.pointerOffset)),
+      0,
+    );
+
+    const pointerControl = new SceneEngine({ ...DEFAULT_PHYSICS });
+    const butterflyPointerEngine = new SceneEngine({ ...DEFAULT_PHYSICS });
+    pointerControl.seek(8);
+    butterflyPointerEngine.seek(8);
+    const pointerTarget = butterflyPointerEngine.debugButterflies()[0];
+    butterflyPointerEngine.setPointer({ x: pointerTarget.x, y: pointerTarget.y });
+    for (let frame = 0; frame < 30; frame += 1) {
+      pointerControl.advance(1 / 60);
+      butterflyPointerEngine.advance(1 / 60);
+    }
+    const maxPointerDeflection = butterflyPointerEngine.debugButterflies().reduce(
+      (maximum, butterfly, index) => {
+        const control = pointerControl.debugButterflies()[index];
+        return Math.max(maximum, Math.hypot(butterfly.x - control.x, butterfly.y - control.y));
+      },
+      0,
+    );
+
+    record(
+      "post-8s living motion",
+      maxTravel > 1 &&
+        maxPointerOffset > 0.1 &&
+        maxPointerDeflection > 0.5 &&
+        engine.getSnapshot().time === 8,
+      `${maxTravel.toFixed(2)}px orbit travel, ${maxPointerOffset.toFixed(2)}px flower sway, ${maxPointerDeflection.toFixed(2)}px butterfly deflection, timeline ${engine.getSnapshot().time.toFixed(2)}s`,
+    );
+  }
+
   const pre = document.createElement("pre");
   pre.id = "checks";
   pre.textContent = lines.join("\n");

@@ -578,11 +578,12 @@ export class SceneEngine {
     // Aerodynamic torque is a stiff term, so glyphs integrate at a fixed
     // 180Hz. That also makes the result independent of the display refresh
     // rate, which per-frame damping never was.
-    const startTime = this.time;
     let steps = 0;
+    let motionDelta = 0;
     while (this.accumulator >= PHYSICS_DT && steps < MAX_PHYSICS_STEPS) {
       this.time = clamp(this.time + PHYSICS_DT, 0, SCENE_DURATION);
       this.motionTime += PHYSICS_DT;
+      motionDelta += PHYSICS_DT;
       this.stepGlyphs(PHYSICS_DT);
       this.accumulator -= PHYSICS_DT;
       steps += 1;
@@ -591,8 +592,10 @@ export class SceneEngine {
 
     // Butterflies and flowers are kinematic, so one update per frame is
     // enough and keeps the substep cost off them.
-    const sceneDelta = this.time - startTime;
-    if (sceneDelta > 0) this.stepAgents(sceneDelta);
+    // `time` intentionally stops at eight seconds, but `motionTime` and the
+    // living agents do not. Deriving this delta from the clamped scene clock
+    // used to freeze flower pointer response and butterfly orbits at 8.00s.
+    if (motionDelta > 0) this.stepAgents(motionDelta);
   }
 
   /** Read-only access for the calibration harness. Not used by the app. */
@@ -603,6 +606,11 @@ export class SceneEngine {
   /** Read-only access for the calibration harness. Not used by the app. */
   debugFlowers(): readonly Flower[] {
     return this.flowers;
+  }
+
+  /** Read-only access for post-timeline motion checks in the harness. */
+  debugButterflies(): readonly Butterfly[] {
+    return this.butterflies;
   }
 
   getSnapshot(): SceneSnapshot {
