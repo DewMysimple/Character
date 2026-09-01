@@ -43,20 +43,24 @@ export function AnimationCanvas({
   const playingRef = useRef(playing);
   const lastReplayTokenRef = useRef(replayToken);
   const lastSeekTokenRef = useRef(seekRequest?.token ?? 0);
+  const needsRenderRef = useRef(true);
 
   useEffect(() => {
     configRef.current = config;
     engineRef.current?.setConfig(config);
+    needsRenderRef.current = true;
   }, [config]);
 
   useEffect(() => {
     playingRef.current = playing;
+    needsRenderRef.current = true;
   }, [playing]);
 
   useEffect(() => {
     if (!engineRef.current || replayToken === lastReplayTokenRef.current) return;
     lastReplayTokenRef.current = replayToken;
     engineRef.current.reset();
+    needsRenderRef.current = true;
     onSnapshot(engineRef.current.getSnapshot());
   }, [onSnapshot, replayToken]);
 
@@ -65,6 +69,7 @@ export function AnimationCanvas({
     lastSeekTokenRef.current = seekRequest.token;
     engineRef.current.seek(seekRequest.time);
     playingRef.current = false;
+    needsRenderRef.current = true;
     onSnapshot(engineRef.current.getSnapshot());
   }, [onSnapshot, seekRequest]);
 
@@ -92,7 +97,9 @@ export function AnimationCanvas({
       canvas.height = Math.round(viewportHeight * dpr);
       canvas.style.width = `${viewportWidth}px`;
       canvas.style.height = `${viewportHeight}px`;
-      engine.setViewport(viewportWidth, viewportHeight);
+      const stage = fitStage(viewportWidth, viewportHeight);
+      engine.setRenderScale(dpr * stage.scale);
+      needsRenderRef.current = true;
     };
 
     const updatePointer = (event: PointerEvent) => {
@@ -128,25 +135,45 @@ export function AnimationCanvas({
       lastFrame = now;
       if (playingRef.current) engine.advance(delta);
 
+      if (!playingRef.current && !needsRenderRef.current) {
+        frameId = requestAnimationFrame(draw);
+        return;
+      }
+
       const viewport = fitStage(viewportWidth, viewportHeight);
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
-      context.clearRect(0, 0, viewportWidth, viewportHeight);
       context.save();
       context.translate(viewport.offsetX, viewport.offsetY);
       context.scale(viewport.scale, viewport.scale);
       engine.setViewport(DESIGN_WIDTH, DESIGN_HEIGHT);
       engine.render(context);
       context.restore();
+      needsRenderRef.current = false;
 
       frameId = requestAnimationFrame(draw);
     };
 
     frameId = requestAnimationFrame(draw);
 
-    const snapshotTimer = window.setInterval(() => {
-      onSnapshot(engine.getSnapshot());
-    }, 80);
-    onSnapshot(engine.getSnapshot());
+    let lastSnapshot: SceneSnapshot | null = null;
+    const publishSnapshot = () => {
+      const next = engine.getSnapshot();
+      if (
+        lastSnapshot &&
+        next.time === lastSnapshot.time &&
+        next.stage === lastSnapshot.stage &&
+        next.activeGlyphs === lastSnapshot.activeGlyphs &&
+        next.butterflies === lastSnapshot.butterflies &&
+        next.flowers === lastSnapshot.flowers &&
+        next.complete === lastSnapshot.complete
+      ) {
+        return;
+      }
+      lastSnapshot = next;
+      onSnapshot(next);
+    };
+    const snapshotTimer = window.setInterval(publishSnapshot, 80);
+    publishSnapshot();
 
     return () => {
       cancelAnimationFrame(frameId);

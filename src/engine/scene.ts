@@ -70,6 +70,11 @@ const CODE_START_X = 104;
 const CODE_START_Y = 104;
 const CODE_CHAR_STEP = 6.35;
 const CODE_LINE_STEP = 17;
+const CARD_X = 54;
+const CARD_Y = 62;
+const CARD_WIDTH = 612;
+const CARD_HEIGHT = 250;
+const CARD_CACHE_HEIGHT = 340;
 const MAX_CODE_COLUMN = Math.max(...CODE_LINES.map((line) => line.length - 1));
 const COLLAPSE_FOCUS_COLUMN = Math.round(MAX_CODE_COLUMN / 2);
 const COLLAPSE_FOCUS_LINE = 5;
@@ -101,12 +106,32 @@ const BUTTERFLY_SAFE_MARGIN_X = 34;
 const BUTTERFLY_SAFE_TOP = BUTTERFLY_ZONE_TOP - 74;
 const BUTTERFLY_SAFE_BOTTOM = DESIGN_HEIGHT - 96;
 const BUTTERFLY_SEPARATION_RADIUS = 26;
+const SEPARATION_GRID_COLUMNS = Math.ceil(DESIGN_WIDTH / BUTTERFLY_SEPARATION_RADIUS);
+const SEPARATION_GRID_ROWS = Math.ceil(DESIGN_HEIGHT / BUTTERFLY_SEPARATION_RADIUS);
 
 type ParticleSource = (typeof PARTICLE_POSITIONS)[number];
 type ParticleSourcePlan = {
   source: ParticleSource;
   collapsible: boolean;
 };
+
+type CardCache = {
+  base: HTMLCanvasElement;
+  source: HTMLCanvasElement;
+  sourceContext: CanvasRenderingContext2D;
+  scale: number;
+};
+
+type Point = { x: number; y: number };
+
+export interface ScenePerformanceStats {
+  liveGlyphs: number;
+  retiredGlyphs: number;
+  cardCacheBuilds: number;
+  sourceGlyphDraws: number;
+  separationCandidatePairs: number;
+  separationResolvedPairs: number;
+}
 
 const getColumnCollapseGroup = (sourceColumn: number) => {
   const distance = Math.abs(sourceColumn - COLLAPSE_FOCUS_COLUMN);
@@ -144,27 +169,18 @@ const roundedRect = (
   context.closePath();
 };
 
-const drawCodeCard = (
-  context: CanvasRenderingContext2D,
-  time: number,
-  glyphs: GlyphParticle[],
-) => {
-  const cardX = 54;
-  const cardY = 62;
-  const cardWidth = 612;
-  const cardHeight = 250;
-  const cardBottom = cardY + cardHeight;
+const drawCardBase = (context: CanvasRenderingContext2D) => {
+  const cardBottom = CARD_Y + CARD_HEIGHT;
 
-  context.save();
   context.shadowColor = "rgba(69, 61, 52, 0.13)";
   context.shadowBlur = 16;
   context.shadowOffsetY = 8;
   context.fillStyle = "rgba(255, 254, 249, 0.98)";
-  roundedRect(context, cardX, cardY, cardWidth, cardHeight, 10);
+  roundedRect(context, CARD_X, CARD_Y, CARD_WIDTH, CARD_HEIGHT, 10);
   context.fill();
-  context.restore();
-
-  context.save();
+  context.shadowColor = "transparent";
+  context.shadowBlur = 0;
+  context.shadowOffsetY = 0;
   context.fillStyle = "rgba(255, 254, 249, 0.98)";
   context.beginPath();
   context.moveTo(344, cardBottom - 1);
@@ -175,40 +191,19 @@ const drawCodeCard = (
 
   context.fillStyle = "rgba(105, 96, 85, 0.18)";
   context.beginPath();
-  context.arc(cardX + 18, cardY + 18, 3, 0, Math.PI * 2);
-  context.arc(cardX + 29, cardY + 18, 3, 0, Math.PI * 2);
-  context.arc(cardX + 40, cardY + 18, 3, 0, Math.PI * 2);
+  context.arc(CARD_X + 18, CARD_Y + 18, 3, 0, Math.PI * 2);
+  context.arc(CARD_X + 29, CARD_Y + 18, 3, 0, Math.PI * 2);
+  context.arc(CARD_X + 40, CARD_Y + 18, 3, 0, Math.PI * 2);
   context.fill();
 
   context.font = GLYPH_FONT;
   context.textBaseline = "middle";
-  const missingGlyphs = new Map(
-    glyphs
-      .filter((glyph) => glyph.active)
-      .map((glyph) => [
-        `${glyph.sourceLine}:${glyph.sourceColumn}`,
-        clamp((time - glyph.releaseAt) / SOURCE_GLYPH_FADE_DURATION, 0, 1),
-      ]),
-  );
-  CODE_LINES.forEach((line, lineIndex) => {
-    const y = cardY + 42 + lineIndex * CODE_LINE_STEP;
+  CODE_LINES.forEach((_line, lineIndex) => {
+    const y = CODE_START_Y + lineIndex * CODE_LINE_STEP;
     context.fillStyle = "rgba(128, 120, 109, 0.56)";
     context.textAlign = "right";
-    context.fillText(String(lineIndex + 31), cardX + 34, y);
-
-    context.textAlign = "left";
-    const reveal = clamp((time - 0.2) / 0.9, 0, 1);
-    const visibleLength = Math.ceil(line.length * reveal);
-    [...line.slice(0, visibleLength)].forEach((character, characterIndex) => {
-      const sourceFade = missingGlyphs.get(`${lineIndex}:${characterIndex}`) ?? 0;
-      const color = getGlyphColor(lineIndex, characterIndex);
-      context.globalAlpha = 1 - sourceFade;
-      context.fillStyle = character === " " ? "rgba(70, 68, 63, 0.52)" : color;
-      context.fillText(character, cardX + 50 + characterIndex * CODE_CHAR_STEP, y);
-    });
+    context.fillText(String(lineIndex + 31), CARD_X + 34, y);
   });
-  context.globalAlpha = 1;
-  context.restore();
 };
 
 const drawTitle = (context: CanvasRenderingContext2D, time: number) => {
@@ -229,9 +224,6 @@ const getFlowerWindOffset = (flower: Flower, motionTime: number, windStrength: n
     Math.sin(motionTime * 0.68 + flower.windPhase) * naturalAmplitude * (0.35 + windStrength)
   );
 };
-
-const getFlowerStemSway = (flower: Flower, motionTime: number, windStrength: number) =>
-  flower.sway + getFlowerWindOffset(flower, motionTime, windStrength);
 
 const getQuadraticPoint = (
   startX: number,
@@ -257,8 +249,9 @@ const getFlowerPose = (
   includePointerOffset = true,
 ) => {
   const progress = clamp(stemProgress, 0, 1);
-  const stemSway = getFlowerStemSway(flower, motionTime, windStrength);
-  const bodyWind = getFlowerWindOffset(flower, motionTime, windStrength) * 0.35;
+  const windOffset = getFlowerWindOffset(flower, motionTime, windStrength);
+  const stemSway = flower.sway + windOffset;
+  const bodyWind = windOffset * 0.35;
   const interactiveShift = includePointerOffset ? flower.pointerOffset : 0;
   const bodyShift = bodyWind + interactiveShift;
   const rootX = flower.x;
@@ -363,18 +356,23 @@ const drawFlower = (
   const petalLength = 12 * petalProgress;
   for (let index = 0; index < petalCount; index += 1) {
     const angle = (Math.PI * 2 * index) / petalCount - Math.PI / 2;
-    context.save();
-    context.translate(pose.tipX, pose.tipY);
-    context.rotate(angle);
     context.globalAlpha = 0.74 * petalProgress;
     context.fillStyle = flower.color;
     context.strokeStyle = "rgba(104, 99, 92, 0.35)";
     context.lineWidth = 0.65;
     context.beginPath();
-    context.ellipse(0, -petalLength * 0.7, 4.5 * petalProgress, petalLength, 0, 0, Math.PI * 2);
+    const petalCenterDistance = petalLength * 0.7;
+    context.ellipse(
+      pose.tipX + Math.sin(angle) * petalCenterDistance,
+      pose.tipY - Math.cos(angle) * petalCenterDistance,
+      4.5 * petalProgress,
+      petalLength,
+      angle,
+      0,
+      Math.PI * 2,
+    );
     context.fill();
     context.stroke();
-    context.restore();
   }
   context.fillStyle = "rgba(164, 133, 96, 0.78)";
   context.beginPath();
@@ -488,12 +486,32 @@ export class SceneEngine {
   private flowers: Flower[] = [];
   private viewport = { width: DESIGN_WIDTH, height: DESIGN_HEIGHT };
   private backgroundCanvas: HTMLCanvasElement | null = null;
+  private renderScale = 1;
+  private cardCache: CardCache | null = null;
   private pointer: ScenePointer | null = null;
   private accumulator = 0;
   private agentAccumulator = 0;
   private air: AirField;
+  private readonly airSample: Point = { x: 0, y: 0 };
+  private releaseQueue: GlyphParticle[] = [];
+  private releaseCursor = 0;
+  private liveGlyphs: GlyphParticle[] = [];
   private erosionPhaseA = 0;
   private erosionPhaseB = 0;
+  private cardCacheBuilds = 0;
+  private sourceGlyphDraws = 0;
+  private separationCandidatePairs = 0;
+  private separationResolvedPairs = 0;
+  private readonly flowerHeadX = new Float64Array(36);
+  private readonly flowerHeadY = new Float64Array(36);
+  private readonly targetOccupancy = new Int16Array(36);
+  private separationForceX = new Float64Array(0);
+  private separationForceY = new Float64Array(0);
+  private separationGridNext = new Int32Array(0);
+  private separationCandidates = new Int32Array(0);
+  private readonly separationGridHead = new Int32Array(
+    SEPARATION_GRID_COLUMNS * SEPARATION_GRID_ROWS,
+  );
 
   constructor(config: PhysicsConfig = DEFAULT_PHYSICS, seed = 47) {
     this.config = { ...config };
@@ -506,6 +524,13 @@ export class SceneEngine {
     if (width === this.viewport.width && height === this.viewport.height) return;
     this.viewport = { width, height };
     this.backgroundCanvas = null;
+  }
+
+  setRenderScale(scale: number) {
+    const nextScale = clamp(scale, 0.5, 6);
+    if (Math.abs(nextScale - this.renderScale) < 0.01) return;
+    this.renderScale = nextScale;
+    this.cardCache = null;
   }
 
   setPointer(pointer: ScenePointer | null) {
@@ -539,14 +564,22 @@ export class SceneEngine {
     this.accumulator = 0;
     this.agentAccumulator = 0;
     this.glyphs = [];
+    this.releaseQueue = [];
+    this.releaseCursor = 0;
+    this.liveGlyphs = [];
     this.butterflies = [];
     this.flowers = [];
     this.backgroundCanvas = null;
+    this.cardCache = null;
     this.air = new AirField(seed);
     this.erosionPhaseA = seededRandom(seed + 411) * Math.PI * 2;
     this.erosionPhaseB = seededRandom(seed + 412) * Math.PI * 2;
     this.buildFlowers();
+    this.updateFlowerHeadCache();
     this.buildGlyphs();
+    this.releaseQueue = this.glyphs
+      .filter((glyph) => Number.isFinite(glyph.releaseAt))
+      .sort((left, right) => left.releaseAt - right.releaseAt || left.id - right.id);
   }
 
   seek(targetTime: number) {
@@ -617,11 +650,60 @@ export class SceneEngine {
     return this.butterflies;
   }
 
+  /** Development-only counters for performance regression checks. */
+  debugPerformance(): ScenePerformanceStats {
+    return {
+      liveGlyphs: this.liveGlyphs.length,
+      retiredGlyphs: this.glyphs.filter((glyph) => glyph.retired).length,
+      cardCacheBuilds: this.cardCacheBuilds,
+      sourceGlyphDraws: this.sourceGlyphDraws,
+      separationCandidatePairs: this.separationCandidatePairs,
+      separationResolvedPairs: this.separationResolvedPairs,
+    };
+  }
+
+  /** Compare the deterministic spatial grid against the former brute force. */
+  debugSeparationComparison(strength = this.config.butterflySeparation) {
+    this.computeButterflySeparation(strength);
+    const bruteX = new Float64Array(this.butterflies.length);
+    const bruteY = new Float64Array(this.butterflies.length);
+    let brutePairs = 0;
+    for (let first = 0; first < this.butterflies.length; first += 1) {
+      const left = this.butterflies[first];
+      if (left.alpha <= 0.04) continue;
+      for (let second = first + 1; second < this.butterflies.length; second += 1) {
+        const right = this.butterflies[second];
+        if (right.alpha <= 0.04) continue;
+        brutePairs += 1;
+        this.accumulateButterflySeparation(
+          first,
+          second,
+          strength,
+          bruteX,
+          bruteY,
+        );
+      }
+    }
+    let maxForceError = 0;
+    for (let index = 0; index < this.butterflies.length; index += 1) {
+      maxForceError = Math.max(
+        maxForceError,
+        Math.abs(this.separationForceX[index] - bruteX[index]),
+        Math.abs(this.separationForceY[index] - bruteY[index]),
+      );
+    }
+    return {
+      maxForceError,
+      candidatePairs: this.separationCandidatePairs,
+      brutePairs,
+    };
+  }
+
   getSnapshot(): SceneSnapshot {
     return {
       time: this.time,
       stage: this.getStage(),
-      activeGlyphs: this.glyphs.filter((glyph) => glyph.active && glyph.alpha > 0.04).length,
+      activeGlyphs: this.liveGlyphs.filter((glyph) => glyph.alpha > 0.04).length,
       butterflies: this.butterflies.filter((butterfly) => butterfly.alpha > 0.04).length,
       flowers: this.flowers.filter((flower) => flower.activated && flower.petalProgress > 0.1).length,
       complete: this.time >= SCENE_DURATION,
@@ -635,7 +717,7 @@ export class SceneEngine {
 
     if (!this.backgroundCanvas) this.buildBackground();
     if (this.backgroundCanvas) context.drawImage(this.backgroundCanvas, 0, 0, width, height);
-    drawCodeCard(context, this.time, this.glyphs);
+    this.drawCodeCard(context);
     drawTitle(context, this.time);
     this.flowers.forEach((flower) =>
       drawFlower(context, flower, this.motionTime, this.config.flowerWindStrength),
@@ -647,41 +729,52 @@ export class SceneEngine {
   private stepGlyphs(delta: number) {
     const isColumnCollapse = this.config.collapseMode === "column-collapse";
     const isCenterCollapse = this.config.collapseMode === "center-collapse";
+    let released = false;
+    while (
+      this.releaseCursor < this.releaseQueue.length &&
+      this.time >= this.releaseQueue[this.releaseCursor].releaseAt
+    ) {
+      const glyph = this.releaseQueue[this.releaseCursor];
+      this.releaseCursor += 1;
+      glyph.active = true;
+      glyph.retired = false;
+      // Spawn at the cell centre: the card draws left-aligned, the particle
+      // draws centred, so without this the glyph jumps half an advance.
+      glyph.x = CODE_START_X + glyph.sourceColumn * CODE_CHAR_STEP + CODE_CHAR_STEP / 2;
+      glyph.y = CODE_START_Y + glyph.sourceLine * CODE_LINE_STEP;
+      glyph.releaseY = glyph.y;
+      glyph.vx = isColumnCollapse
+        ? (seededRandom(this.seed + glyph.sourceColumn * 2.61 + 41) - 0.5) * 2.1
+        : (seededRandom(glyph.seed + 23) - 0.5) * 17;
+      glyph.vy = isColumnCollapse
+        ? 0.7 + seededRandom(this.seed + glyph.sourceColumn * 3.17 + 91) * 1.5
+        : 0.5 + seededRandom(glyph.seed + 24) * 2.1;
+      this.liveGlyphs.push(glyph);
+      this.clearCachedSourceGlyph(glyph);
+      released = true;
+    }
+    if (released) this.liveGlyphs.sort((left, right) => left.id - right.id);
+    if (this.liveGlyphs.length === 0) return;
+
     this.air.update(
       this.motionTime,
       this.config.airTurbulence,
       this.config.airTurbulenceScale,
     );
 
-    this.glyphs.forEach((glyph) => {
-      if (!glyph.active && this.time >= glyph.releaseAt) {
-        glyph.active = true;
-        // Spawn at the cell centre: the card draws left-aligned, the particle
-        // draws centred, so without this the glyph jumps half an advance.
-        glyph.x = CODE_START_X + glyph.sourceColumn * CODE_CHAR_STEP + CODE_CHAR_STEP / 2;
-        glyph.y = CODE_START_Y + glyph.sourceLine * CODE_LINE_STEP;
-        glyph.releaseY = glyph.y;
-        // A whole column has to read as one gap, so column mode seeds its
-        // detach impulse from the column rather than the character.
-        glyph.vx = isColumnCollapse
-          ? (seededRandom(this.seed + glyph.sourceColumn * 2.61 + 41) - 0.5) * 2.1
-          : (seededRandom(glyph.seed + 23) - 0.5) * 17;
-        glyph.vy = isColumnCollapse
-          ? 0.7 + seededRandom(this.seed + glyph.sourceColumn * 3.17 + 91) * 1.5
-          : 0.5 + seededRandom(glyph.seed + 24) * 2.1;
-      }
-      if (!glyph.active) return;
-
+    let writeIndex = 0;
+    this.liveGlyphs.forEach((glyph) => {
       const glyphAge = Math.max(0, this.time - glyph.releaseAt);
       const centerPull = isCenterCollapse
         ? (COLLAPSE_CENTER_X - glyph.x) * this.config.centerAttraction * 1.6
         : 0;
 
+      this.air.sampleInto(glyph.x, glyph.y, this.airSample);
       integrateGlyph(
         glyph,
         this.config,
-        this.air.sampleX(glyph.x, glyph.y),
-        this.air.sampleY(glyph.x, glyph.y),
+        this.airSample.x,
+        this.airSample.y,
         centerPull,
         delta,
       );
@@ -692,7 +785,11 @@ export class SceneEngine {
       const projectedY = VANISH_Y + (glyph.y - VANISH_Y) * (1 + glyph.depth);
       const reachedFlowerZone = projectedY >= glyph.morphThresholdY;
       const safeFallback = this.time >= glyph.morphAt && projectedY >= FLOWER_ZONE_MIN_Y - 70;
-      if (glyph.stage !== "morphing" && enoughDropTime && (reachedFlowerZone || safeFallback)) {
+      if (
+        glyph.stage !== "morphing" &&
+        enoughDropTime &&
+        (reachedFlowerZone || safeFallback)
+      ) {
         glyph.stage = "morphing";
         glyph.morphAt = this.time;
         glyph.morphProgress = 0;
@@ -706,17 +803,30 @@ export class SceneEngine {
           1,
         );
         glyph.alpha = 1 - easeInOut(glyph.morphProgress);
+        if (
+          this.time >= SCENE_DURATION ||
+          glyph.morphProgress >= 1 - 1e-9 ||
+          this.time + 1e-9 >= glyph.morphAt + this.config.morphDuration
+        ) {
+          glyph.alpha = 0;
+          glyph.retired = true;
+          return;
+        }
       } else {
         glyph.stage = "falling";
         // Fade in over the same window the card character fades out, so the
         // handover reads as one glyph coming loose instead of a hard swap.
         glyph.alpha = 0.96 * clamp(glyphAge / SOURCE_GLYPH_FADE_DURATION, 0, 1);
       }
+      this.liveGlyphs[writeIndex] = glyph;
+      writeIndex += 1;
     });
+    this.liveGlyphs.length = writeIndex;
   }
 
   private stepAgents(delta: number) {
     this.updateFlowerPointer(delta);
+    this.updateFlowerHeadCache();
 
     const pointer = this.config.pointerInteractionEnabled ? this.pointer : null;
     const pointerRadius = Math.max(1, this.config.butterflyPointerRadius);
@@ -728,7 +838,11 @@ export class SceneEngine {
     const tiltCos = Math.cos(tilt);
     const tiltSin = Math.sin(tilt);
     const separationStrength = clamp(this.config.butterflySeparation, 0, 1.5);
-    const separation = this.computeButterflySeparation(separationStrength);
+    this.computeButterflySeparation(separationStrength);
+    this.targetOccupancy.fill(0);
+    this.butterflies.forEach((butterfly) => {
+      this.targetOccupancy[butterfly.targetFlowerId] += 1;
+    });
 
     this.butterflies.forEach((butterfly, index) => {
       const age = Math.max(0, this.motionTime - butterfly.birthTime);
@@ -804,8 +918,8 @@ export class SceneEngine {
         }
       }
 
-      let accelerationX = separation[index].x;
-      let accelerationY = separation[index].y;
+      let accelerationX = this.separationForceX[index];
+      let accelerationY = this.separationForceY[index];
       let maxSpeed = 125 * flightSpeedScale;
 
       if (butterfly.flightMode === "orbit") {
@@ -945,32 +1059,130 @@ export class SceneEngine {
     });
   }
 
-  private computeButterflySeparation(strength: number) {
-    const forces = this.butterflies.map(() => ({ x: 0, y: 0 }));
-    if (strength <= 0) return forces;
+  private ensureSeparationCapacity(count: number) {
+    if (this.separationForceX.length >= count) return;
+    this.separationForceX = new Float64Array(count);
+    this.separationForceY = new Float64Array(count);
+    this.separationGridNext = new Int32Array(count);
+    this.separationCandidates = new Int32Array(count);
+  }
 
-    for (let first = 0; first < this.butterflies.length; first += 1) {
+  private getSeparationCell(x: number, y: number) {
+    const column = clamp(
+      Math.floor(x / BUTTERFLY_SEPARATION_RADIUS),
+      0,
+      SEPARATION_GRID_COLUMNS - 1,
+    );
+    const row = clamp(
+      Math.floor(y / BUTTERFLY_SEPARATION_RADIUS),
+      0,
+      SEPARATION_GRID_ROWS - 1,
+    );
+    return row * SEPARATION_GRID_COLUMNS + column;
+  }
+
+  private accumulateButterflySeparation(
+    first: number,
+    second: number,
+    strength: number,
+    forceX: Float64Array,
+    forceY: Float64Array,
+  ) {
+    const left = this.butterflies[first];
+    const right = this.butterflies[second];
+    const distanceX = left.x - right.x;
+    const distanceY = left.y - right.y;
+    const distanceSquared = distanceX * distanceX + distanceY * distanceY;
+    if (distanceSquared >= BUTTERFLY_SEPARATION_RADIUS * BUTTERFLY_SEPARATION_RADIUS) {
+      return false;
+    }
+    const distance = Math.hypot(distanceX, distanceY);
+    const fallbackAngle = (left.seed + right.seed) * 0.19;
+    const directionX = distance > 0.001 ? distanceX / distance : Math.cos(fallbackAngle);
+    const directionY = distance > 0.001 ? distanceY / distance : Math.sin(fallbackAngle);
+    const influence = (1 - distance / BUTTERFLY_SEPARATION_RADIUS) ** 2;
+    const force = influence * 210 * strength;
+    forceX[first] += directionX * force;
+    forceY[first] += directionY * force;
+    forceX[second] -= directionX * force;
+    forceY[second] -= directionY * force;
+    return true;
+  }
+
+  private computeButterflySeparation(strength: number) {
+    const count = this.butterflies.length;
+    this.ensureSeparationCapacity(count);
+    this.separationForceX.fill(0, 0, count);
+    this.separationForceY.fill(0, 0, count);
+    this.separationCandidatePairs = 0;
+    this.separationResolvedPairs = 0;
+    if (strength <= 0 || count === 0) return;
+
+    this.separationGridHead.fill(-1);
+    this.separationGridNext.fill(-1, 0, count);
+    for (let index = 0; index < count; index += 1) {
+      const butterfly = this.butterflies[index];
+      if (butterfly.alpha <= 0.04) continue;
+      const cell = this.getSeparationCell(butterfly.x, butterfly.y);
+      this.separationGridNext[index] = this.separationGridHead[cell];
+      this.separationGridHead[cell] = index;
+    }
+
+    for (let first = 0; first < count; first += 1) {
       const left = this.butterflies[first];
       if (left.alpha <= 0.04) continue;
-      for (let second = first + 1; second < this.butterflies.length; second += 1) {
-        const right = this.butterflies[second];
-        if (right.alpha <= 0.04) continue;
-        const distanceX = left.x - right.x;
-        const distanceY = left.y - right.y;
-        const distance = Math.hypot(distanceX, distanceY);
-        if (distance >= BUTTERFLY_SEPARATION_RADIUS) continue;
-        const fallbackAngle = (left.seed + right.seed) * 0.19;
-        const directionX = distance > 0.001 ? distanceX / distance : Math.cos(fallbackAngle);
-        const directionY = distance > 0.001 ? distanceY / distance : Math.sin(fallbackAngle);
-        const influence = (1 - distance / BUTTERFLY_SEPARATION_RADIUS) ** 2;
-        const force = influence * 210 * strength;
-        forces[first].x += directionX * force;
-        forces[first].y += directionY * force;
-        forces[second].x -= directionX * force;
-        forces[second].y -= directionY * force;
+      const column = clamp(
+        Math.floor(left.x / BUTTERFLY_SEPARATION_RADIUS),
+        0,
+        SEPARATION_GRID_COLUMNS - 1,
+      );
+      const row = clamp(
+        Math.floor(left.y / BUTTERFLY_SEPARATION_RADIUS),
+        0,
+        SEPARATION_GRID_ROWS - 1,
+      );
+      let candidateCount = 0;
+      for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+        const candidateRow = row + offsetY;
+        if (candidateRow < 0 || candidateRow >= SEPARATION_GRID_ROWS) continue;
+        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+          const candidateColumn = column + offsetX;
+          if (
+            candidateColumn < 0 ||
+            candidateColumn >= SEPARATION_GRID_COLUMNS
+          ) {
+            continue;
+          }
+          let second =
+            this.separationGridHead[
+              candidateRow * SEPARATION_GRID_COLUMNS + candidateColumn
+            ];
+          while (second >= 0) {
+            if (second > first) {
+              this.separationCandidates[candidateCount] = second;
+              candidateCount += 1;
+            }
+            second = this.separationGridNext[second];
+          }
+        }
+      }
+      this.separationCandidates.subarray(0, candidateCount).sort();
+      for (let candidate = 0; candidate < candidateCount; candidate += 1) {
+        const second = this.separationCandidates[candidate];
+        this.separationCandidatePairs += 1;
+        if (
+          this.accumulateButterflySeparation(
+            first,
+            second,
+            strength,
+            this.separationForceX,
+            this.separationForceY,
+          )
+        ) {
+          this.separationResolvedPairs += 1;
+        }
       }
     }
-    return forces;
   }
 
   private setButterflyMode(
@@ -1002,13 +1214,16 @@ export class SceneEngine {
   }
 
   private beginButterflyTransfer(butterfly: Butterfly) {
+    const currentFlowerId = butterfly.targetFlowerId;
     const nextFlowerId = this.chooseNextFlower(butterfly);
-    if (nextFlowerId === butterfly.targetFlowerId) {
+    if (nextFlowerId === currentFlowerId) {
       this.beginButterflyOrbit(butterfly);
       return;
     }
-    butterfly.previousFlowerId = butterfly.targetFlowerId;
+    butterfly.previousFlowerId = currentFlowerId;
     butterfly.targetFlowerId = nextFlowerId;
+    this.targetOccupancy[currentFlowerId] -= 1;
+    this.targetOccupancy[nextFlowerId] += 1;
     butterfly.flowerOffsetX =
       (seededRandom(butterfly.seed + butterfly.visitCount * 73.1 + 91) - 0.5) * 10;
     this.setButterflyMode(butterfly, "transfer", Number.POSITIVE_INFINITY);
@@ -1016,11 +1231,6 @@ export class SceneEngine {
   }
 
   private chooseNextFlower(butterfly: Butterfly) {
-    const occupancy = new Array(this.flowers.length).fill(0) as number[];
-    this.butterflies.forEach((candidate) => {
-      occupancy[candidate.targetFlowerId] += 1;
-    });
-
     const transferRange = 180 + this.config.butterflyOrbitDrift * 90;
     const currentX = butterfly.targetX;
     const currentY = butterfly.targetY;
@@ -1033,14 +1243,12 @@ export class SceneEngine {
           flower.petalProgress >= 0.7,
       )
       .map((flower) => {
-        const head = getFlowerHeadPosition(
-          flower,
-          this.motionTime,
-          this.config.flowerWindStrength,
-        );
         return {
           id: flower.id,
-          distance: Math.hypot(head.x - currentX, head.y - currentY),
+          distance: Math.hypot(
+            this.flowerHeadX[flower.id] - currentX,
+            this.flowerHeadY[flower.id] - currentY,
+          ),
         };
       })
       .sort((left, right) => left.distance - right.distance || left.id - right.id);
@@ -1050,7 +1258,8 @@ export class SceneEngine {
     if (pool.length === 0) return butterfly.targetFlowerId;
 
     const weights = pool.map(
-      ({ id, distance }) => 1 / ((distance + 60) * (1 + occupancy[id] * 0.45)),
+      ({ id, distance }) =>
+        1 / ((distance + 60) * (1 + this.targetOccupancy[id] * 0.45)),
     );
     const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
     let selector =
@@ -1167,6 +1376,7 @@ export class SceneEngine {
         sourceLine: source.sourceLine,
         sourceColumn: source.sourceColumn,
         active: false,
+        retired: false,
         flowerLinked: false,
       });
     }
@@ -1346,13 +1556,8 @@ export class SceneEngine {
   private updateButterflyFlightTarget(butterfly: Butterfly) {
     const flower = this.flowers[butterfly.targetFlowerId];
     if (flower) {
-      const headPosition = getFlowerHeadPosition(
-        flower,
-        this.motionTime,
-        this.config.flowerWindStrength,
-      );
-      butterfly.flowerX = headPosition.x + butterfly.flowerOffsetX;
-      butterfly.flowerY = headPosition.y;
+      butterfly.flowerX = this.flowerHeadX[flower.id] + butterfly.flowerOffsetX;
+      butterfly.flowerY = this.flowerHeadY[flower.id];
     }
     butterfly.targetX = clamp(butterfly.flowerX, 34, DESIGN_WIDTH - 34);
     butterfly.targetY = clamp(butterfly.flowerY, BUTTERFLY_ZONE_TOP - 18, DESIGN_HEIGHT - 112);
@@ -1393,6 +1598,18 @@ export class SceneEngine {
     });
   }
 
+  private updateFlowerHeadCache() {
+    this.flowers.forEach((flower) => {
+      const head = getFlowerHeadPosition(
+        flower,
+        this.motionTime,
+        this.config.flowerWindStrength,
+      );
+      this.flowerHeadX[flower.id] = head.x;
+      this.flowerHeadY[flower.id] = head.y;
+    });
+  }
+
   private buildFlowers() {
     this.flowers = [];
     for (let index = 0; index < 36; index += 1) {
@@ -1420,9 +1637,15 @@ export class SceneEngine {
     const targetFlowerId = id % this.flowers.length;
     const targetFlower = this.flowers[targetFlowerId];
     const flowerOffsetX = (seededRandom(glyph.seed + 13) - 0.5) * 10;
-    const flowerX =
-      targetFlower.x + targetFlower.sway * 0.45 + flowerOffsetX;
-    const flowerY = targetFlower.groundY - targetFlower.height;
+    // Spawning can happen between 60Hz agent ticks. Sample the flower at the
+    // exact handoff time here; subsequent shared updates use the cached heads.
+    const spawnHead = getFlowerHeadPosition(
+      targetFlower,
+      this.motionTime,
+      this.config.flowerWindStrength,
+    );
+    const flowerX = spawnHead.x + flowerOffsetX;
+    const flowerY = spawnHead.y;
     const baseScale = 0.43 + seededRandom(glyph.seed + 12) * 0.36;
     // Hand over at the glyph's *projected* position, or a depth-shifted glyph
     // would jump at the moment it becomes a butterfly.
@@ -1452,8 +1675,8 @@ export class SceneEngine {
       flowerX,
       flowerY,
       flowerOffsetX,
-      targetX: DESIGN_WIDTH / 2,
-      targetY: (BUTTERFLY_ZONE_TOP + BUTTERFLY_ZONE_BOTTOM) / 2,
+      targetX: clamp(flowerX, 34, DESIGN_WIDTH - 34),
+      targetY: clamp(flowerY, BUTTERFLY_ZONE_TOP - 18, DESIGN_HEIGHT - 112),
       orbitRadius: 0.78 + seededRandom(glyph.seed + 15) * 0.44,
       orbitHeight: 0.78 + seededRandom(glyph.seed + 16) * 0.44,
       flightPhase: seededRandom(glyph.seed + 17) * Math.PI * 2,
@@ -1468,7 +1691,6 @@ export class SceneEngine {
       pointerEvading: false,
       flowerLinked: false,
     };
-    this.updateButterflyFlightTarget(butterfly);
     this.butterflies.push(butterfly);
   }
 
@@ -1486,6 +1708,135 @@ export class SceneEngine {
     );
   }
 
+  private buildCardCache() {
+    const scale = this.renderScale;
+    const width = Math.ceil(DESIGN_WIDTH * scale);
+    const height = Math.ceil(CARD_CACHE_HEIGHT * scale);
+    const base = document.createElement("canvas");
+    const source = document.createElement("canvas");
+    base.width = width;
+    base.height = height;
+    source.width = width;
+    source.height = height;
+    const baseContext = base.getContext("2d");
+    const sourceContext = source.getContext("2d");
+    if (!baseContext || !sourceContext) return;
+
+    baseContext.setTransform(scale, 0, 0, scale, 0, 0);
+    drawCardBase(baseContext);
+
+    sourceContext.setTransform(scale, 0, 0, scale, 0, 0);
+    sourceContext.font = GLYPH_FONT;
+    sourceContext.textAlign = "left";
+    sourceContext.textBaseline = "middle";
+    CODE_LINES.forEach((line, lineIndex) => {
+      const y = CODE_START_Y + lineIndex * CODE_LINE_STEP;
+      [...line].forEach((character, characterIndex) => {
+        if (character === " ") return;
+        sourceContext.fillStyle = getGlyphColor(lineIndex, characterIndex);
+        sourceContext.fillText(
+          character,
+          CODE_START_X + characterIndex * CODE_CHAR_STEP,
+          y,
+        );
+      });
+    });
+
+    this.cardCache = { base, source, sourceContext, scale };
+    this.cardCacheBuilds += 1;
+    this.glyphs.forEach((glyph) => {
+      if (glyph.active) this.clearCachedSourceGlyph(glyph);
+    });
+  }
+
+  private clearCachedSourceGlyph(glyph: GlyphParticle) {
+    const cache = this.cardCache;
+    if (!cache) return;
+    const x = CODE_START_X + glyph.sourceColumn * CODE_CHAR_STEP;
+    const y = CODE_START_Y + glyph.sourceLine * CODE_LINE_STEP;
+    // The source font fits inside one monospace cell; clearing by cell removes
+    // it in one operation without touching either neighbour.
+    cache.sourceContext.clearRect(
+      x - 0.2,
+      y - CODE_LINE_STEP / 2,
+      CODE_CHAR_STEP + 0.2,
+      CODE_LINE_STEP,
+    );
+  }
+
+  private drawCodeCard(context: CanvasRenderingContext2D) {
+    if (!this.cardCache) this.buildCardCache();
+    const cache = this.cardCache;
+    if (!cache) return;
+
+    context.drawImage(
+      cache.base,
+      0,
+      0,
+      cache.base.width,
+      cache.base.height,
+      0,
+      0,
+      DESIGN_WIDTH,
+      CARD_CACHE_HEIGHT,
+    );
+
+    const reveal = clamp((this.time - 0.2) / 0.9, 0, 1);
+    if (reveal >= 1) {
+      context.drawImage(
+        cache.source,
+        0,
+        0,
+        cache.source.width,
+        cache.source.height,
+        0,
+        0,
+        DESIGN_WIDTH,
+        CARD_CACHE_HEIGHT,
+      );
+    } else if (reveal > 0) {
+      CODE_LINES.forEach((line, lineIndex) => {
+        const visibleLength = Math.ceil(line.length * reveal);
+        if (visibleLength <= 0) return;
+        const width = Math.min(line.length, visibleLength) * CODE_CHAR_STEP;
+        const top = CODE_START_Y + lineIndex * CODE_LINE_STEP - CODE_LINE_STEP / 2;
+        context.drawImage(
+          cache.source,
+          CODE_START_X * cache.scale,
+          top * cache.scale,
+          width * cache.scale,
+          CODE_LINE_STEP * cache.scale,
+          CODE_START_X,
+          top,
+          width,
+          CODE_LINE_STEP,
+        );
+      });
+    }
+
+    this.sourceGlyphDraws = 0;
+    context.save();
+    context.font = GLYPH_FONT;
+    context.textAlign = "left";
+    context.textBaseline = "middle";
+    this.liveGlyphs.forEach((glyph) => {
+      const fade = clamp((this.time - glyph.releaseAt) / SOURCE_GLYPH_FADE_DURATION, 0, 1);
+      if (fade >= 1) return;
+      const line = CODE_LINES[glyph.sourceLine];
+      const visibleLength = Math.ceil(line.length * reveal);
+      if (glyph.sourceColumn >= visibleLength) return;
+      context.globalAlpha = 1 - fade;
+      context.fillStyle = glyph.color;
+      context.fillText(
+        glyph.char,
+        CODE_START_X + glyph.sourceColumn * CODE_CHAR_STEP,
+        CODE_START_Y + glyph.sourceLine * CODE_LINE_STEP,
+      );
+      this.sourceGlyphDraws += 1;
+    });
+    context.restore();
+  }
+
   private renderGlyphs(context: CanvasRenderingContext2D) {
     context.save();
     context.font = GLYPH_FONT;
@@ -1493,8 +1844,8 @@ export class SceneEngine {
     context.textBaseline = "middle";
     const blurStrength = clamp(this.config.motionBlur, 0, 1.5);
 
-    this.glyphs.forEach((glyph) => {
-      if (!glyph.active || glyph.alpha <= 0.015) return;
+    this.liveGlyphs.forEach((glyph) => {
+      if (glyph.alpha <= 0.015) return;
 
       const projected = projectGlyph(glyph);
       // Atmospheric perspective: only the far layer washes out.

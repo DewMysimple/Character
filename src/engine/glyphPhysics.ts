@@ -212,15 +212,7 @@ export class AirField {
     }
   }
 
-  sampleX(x: number, y: number) {
-    return this.sample(x, y, 0);
-  }
-
-  sampleY(x: number, y: number) {
-    return this.sample(x, y, 1);
-  }
-
-  private sample(x: number, y: number, offset: number) {
+  sampleInto(x: number, y: number, output: { x: number; y: number }) {
     const gridX = clamp(x / AIR_CELL_WIDTH, 0, AIR_COLUMNS - 1.0001);
     const gridY = clamp(y / AIR_CELL_HEIGHT, 0, AIR_ROWS - 1.0001);
     const column = Math.floor(gridX);
@@ -228,17 +220,24 @@ export class AirField {
     const fx = gridX - column;
     const fy = gridY - row;
 
-    const topLeft = (row * AIR_COLUMNS + column) * 2 + offset;
+    const topLeft = (row * AIR_COLUMNS + column) * 2;
     const topRight = topLeft + 2;
     const bottomLeft = topLeft + AIR_COLUMNS * 2;
     const bottomRight = bottomLeft + 2;
 
-    const top =
+    const topX =
       this.velocities[topLeft] + (this.velocities[topRight] - this.velocities[topLeft]) * fx;
-    const bottom =
+    const bottomX =
       this.velocities[bottomLeft] +
       (this.velocities[bottomRight] - this.velocities[bottomLeft]) * fx;
-    return top + (bottom - top) * fy;
+    const topY =
+      this.velocities[topLeft + 1] +
+      (this.velocities[topRight + 1] - this.velocities[topLeft + 1]) * fx;
+    const bottomY =
+      this.velocities[bottomLeft + 1] +
+      (this.velocities[bottomRight + 1] - this.velocities[bottomLeft + 1]) * fx;
+    output.x = topX + (bottomX - topX) * fy;
+    output.y = topY + (bottomY - topY) * fy;
   }
 }
 

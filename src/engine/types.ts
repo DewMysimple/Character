@@ -86,6 +86,8 @@ export interface GlyphParticle {
   sourceLine: number;
   sourceColumn: number;
   active: boolean;
+  /** Completed the glyph-to-butterfly handoff and no longer needs simulation. */
+  retired: boolean;
   flowerLinked: boolean;
 }
 

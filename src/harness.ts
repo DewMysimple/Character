@@ -383,6 +383,83 @@ function runChecks() {
     );
   }
 
+  // 13. Every glyph must leave the hot simulation/render path by the end of
+  //     the story, and rebuilding a DPR-aware card cache must preserve holes.
+  {
+    const canvas = document.createElement("canvas");
+    canvas.width = DESIGN_WIDTH * 2;
+    canvas.height = DESIGN_HEIGHT * 2;
+    const context = canvas.getContext("2d");
+    context?.setTransform(2, 0, 0, 2, 0, 0);
+    const engine = new SceneEngine({ ...DEFAULT_PHYSICS });
+    engine.setRenderScale(2);
+    engine.seek(8);
+    if (context) engine.render(context);
+    const first = engine.debugPerformance();
+    engine.setRenderScale(1.5);
+    if (context) engine.render(context);
+    const rebuilt = engine.debugPerformance();
+    record(
+      "glyph retirement and card cache",
+      engine.getSnapshot().activeGlyphs === 0 &&
+        first.liveGlyphs === 0 &&
+        first.retiredGlyphs === PARTICLE_COUNT_DEFAULT &&
+        first.sourceGlyphDraws === 0 &&
+        rebuilt.cardCacheBuilds === first.cardCacheBuilds + 1,
+      `${first.retiredGlyphs}/${PARTICLE_COUNT_DEFAULT} retired, ${first.liveGlyphs} live, ${first.sourceGlyphDraws} source glyph draws, ${rebuilt.cardCacheBuilds} cache builds`,
+    );
+  }
+
+  // 14. The spatial grid must resolve exactly the same local forces as the
+  //     former all-pairs loop while rejecting the overwhelming majority of
+  //     distant pairs before the expensive distance calculation.
+  {
+    const engine = new SceneEngine({ ...DEFAULT_PHYSICS });
+    engine.seek(8);
+    const comparison = engine.debugSeparationComparison();
+    record(
+      "spatial separation parity",
+      comparison.maxForceError < 1e-9 &&
+        comparison.candidatePairs < comparison.brutePairs * 0.25,
+      `${comparison.maxForceError.toExponential(2)} max force error, ${comparison.candidatePairs}/${comparison.brutePairs} candidate pairs`,
+    );
+  }
+
+  // 15. Warm-cache DPR2 performance at the default and maximum supported
+  //     counts. P95 catches recurring stalls without letting one unrelated
+  //     browser scheduling spike fail the deterministic scene checks.
+  {
+    const benchmark = (particleCount: number) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = DESIGN_WIDTH * 2;
+      canvas.height = DESIGN_HEIGHT * 2;
+      const context = canvas.getContext("2d");
+      if (!context) return Number.POSITIVE_INFINITY;
+      context.setTransform(2, 0, 0, 2, 0, 0);
+      const engine = new SceneEngine({ ...DEFAULT_PHYSICS, particleCount });
+      engine.setViewport(DESIGN_WIDTH, DESIGN_HEIGHT);
+      engine.setRenderScale(2);
+      engine.seek(3.2);
+      engine.render(context);
+      const samples: number[] = [];
+      for (let frame = 0; frame < 150; frame += 1) {
+        const started = performance.now();
+        engine.advance(1 / 60);
+        engine.render(context);
+        if (frame >= 10) samples.push(performance.now() - started);
+      }
+      samples.sort((left, right) => left - right);
+      return samples[Math.floor((samples.length - 1) * 0.95)];
+    };
+    const defaultP95 = benchmark(PARTICLE_COUNT_DEFAULT);
+    const maximumP95 = benchmark(PARTICLE_COUNT_MAX);
+    record(
+      "DPR2 performance budget",
+      defaultP95 < 8.3 && maximumP95 < 16.6,
+      `${defaultP95.toFixed(2)}ms default P95, ${maximumP95.toFixed(2)}ms maximum P95`,
+    );
+  }
+
   const pre = document.createElement("pre");
   pre.id = "checks";
   pre.textContent = lines.join("\n");
