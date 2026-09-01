@@ -116,33 +116,6 @@ export function ControlPanel({
               onChange={(value) => onConfigChange("speed", value)}
             />
             <Parameter
-              label="重力"
-              value={config.gravity}
-              min={0.35}
-              max={1.8}
-              step={0.05}
-              display={formatValue(config.gravity)}
-              onChange={(value) => onConfigChange("gravity", value)}
-            />
-            <Parameter
-              label="风力"
-              value={config.wind}
-              min={-1.2}
-              max={1.2}
-              step={0.05}
-              display={formatValue(config.wind)}
-              onChange={(value) => onConfigChange("wind", value)}
-            />
-            <Parameter
-              label="中心吸引"
-              value={config.centerAttraction}
-              min={0}
-              max={1.6}
-              step={0.05}
-              display={formatValue(config.centerAttraction)}
-              onChange={(value) => onConfigChange("centerAttraction", value)}
-            />
-            <Parameter
               label="坍塌时长"
               value={config.collapseDuration}
               min={1.4}
@@ -168,6 +141,124 @@ export function ControlPanel({
               step={10}
               display={String(config.particleCount)}
               onChange={(value) => onConfigChange("particleCount", value)}
+            />
+            <Parameter
+              label="缺口不规则度"
+              value={config.erosionIrregularity}
+              min={0}
+              max={1}
+              step={0.05}
+              display={formatValue(config.erosionIrregularity)}
+              onChange={(value) => onConfigChange("erosionIrregularity", value)}
+            />
+          </div>
+        </ParameterSection>
+
+        <ParameterSection title="坠落物理" note="薄片气动模型与涡旋场">
+          <div className="parameters-grid">
+            <Parameter
+              label="重力"
+              value={config.gravity}
+              min={0.35}
+              max={1.8}
+              step={0.05}
+              display={formatValue(config.gravity)}
+              onChange={(value) => onConfigChange("gravity", value)}
+            />
+            <Parameter
+              label="收尾速度"
+              value={config.terminalVelocity}
+              min={90}
+              max={320}
+              step={5}
+              display={`${Math.round(config.terminalVelocity)}px/s`}
+              onChange={(value) => onConfigChange("terminalVelocity", value)}
+            />
+            <Parameter
+              label="翻滚强度"
+              value={config.glyphTumble}
+              min={0}
+              max={2}
+              step={0.05}
+              display={formatValue(config.glyphTumble)}
+              onChange={(value) => onConfigChange("glyphTumble", value)}
+            />
+            <Parameter
+              label="涡旋强度"
+              value={config.airTurbulence}
+              min={0}
+              max={2}
+              step={0.05}
+              display={formatValue(config.airTurbulence)}
+              onChange={(value) => onConfigChange("airTurbulence", value)}
+            />
+            <Parameter
+              label="涡旋尺度"
+              value={config.airTurbulenceScale}
+              min={0.4}
+              max={2.5}
+              step={0.05}
+              display={formatValue(config.airTurbulenceScale)}
+              onChange={(value) => onConfigChange("airTurbulenceScale", value)}
+            />
+            <Parameter
+              label="质量差异"
+              value={config.glyphMassVariance}
+              min={0}
+              max={1.5}
+              step={0.05}
+              display={formatValue(config.glyphMassVariance)}
+              onChange={(value) => onConfigChange("glyphMassVariance", value)}
+            />
+            <Parameter
+              label="风力"
+              value={config.wind}
+              min={-1.2}
+              max={1.2}
+              step={0.05}
+              display={formatValue(config.wind)}
+              onChange={(value) => onConfigChange("wind", value)}
+            />
+            <Parameter
+              label="中心吸引"
+              value={config.centerAttraction}
+              min={0}
+              max={1.6}
+              step={0.05}
+              display={formatValue(config.centerAttraction)}
+              onChange={(value) => onConfigChange("centerAttraction", value)}
+            />
+          </div>
+        </ParameterSection>
+
+        <ParameterSection title="字符渲染" note="伪 3D 姿态与景深">
+          <div className="parameters-grid">
+            <Parameter
+              label="伪 3D 翻滚"
+              value={config.glyphTilt}
+              min={0}
+              max={2}
+              step={0.05}
+              display={formatValue(config.glyphTilt)}
+              onChange={(value) => onConfigChange("glyphTilt", value)}
+            />
+            <Parameter
+              label="景深强度"
+              value={config.glyphDepth}
+              min={0}
+              max={1.5}
+              step={0.05}
+              display={formatValue(config.glyphDepth)}
+              onChange={(value) => onConfigChange("glyphDepth", value)}
+            />
+            <Parameter
+              label="运动模糊"
+              value={config.motionBlur}
+              min={0}
+              max={1.5}
+              step={0.05}
+              display={formatValue(config.motionBlur)}
+              onChange={(value) => onConfigChange("motionBlur", value)}
             />
           </div>
         </ParameterSection>

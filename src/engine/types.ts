@@ -12,12 +12,20 @@ export interface PhysicsConfig {
   gravity: number;
   wind: number;
   centerAttraction: number;
-  drag: number;
   morphDuration: number;
   collapseDuration: number;
   collapseMode: CollapseMode;
   particleCount: number;
   speed: number;
+  terminalVelocity: number;
+  glyphTumble: number;
+  airTurbulence: number;
+  airTurbulenceScale: number;
+  glyphMassVariance: number;
+  erosionIrregularity: number;
+  glyphTilt: number;
+  glyphDepth: number;
+  motionBlur: number;
   wingBeatFrequency: number;
   butterflyOrbitRadius: number;
   butterflyOrbitHeight: number;
@@ -47,16 +55,26 @@ export interface GlyphParticle {
   y: number;
   vx: number;
   vy: number;
+  /** Screen-plane orientation, radians. */
   rotation: number;
+  /** Live in-plane angular velocity, radians per second. */
   rotationSpeed: number;
+  /** Out-of-plane tilt driving the pseudo-3D foreshortening, radians. */
+  tilt: number;
+  tiltSpeed: number;
+  /** Parallax layer in [-glyphDepth, +glyphDepth]; render-time only. */
+  depth: number;
+  mass: number;
+  dragArea: number;
+  chord: number;
+  /** Y at the moment of release; the glyph may never rise above it. */
+  releaseY: number;
   color: string;
   alpha: number;
   stage: Stage;
   releaseAt: number;
   morphAt: number;
   morphThresholdY: number;
-  flutterPhase: number;
-  turbulencePhase: number;
   morphProgress: number;
   seed: number;
   sourceLine: number;
@@ -131,12 +149,20 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   gravity: 1,
   wind: 0.24,
   centerAttraction: 0.58,
-  drag: 0.988,
   morphDuration: 1.05,
-  collapseDuration: 3.2,
+  collapseDuration: 3.4,
   collapseMode: "local-collapse",
   particleCount: 420,
   speed: 1,
+  terminalVelocity: 180,
+  glyphTumble: 1,
+  airTurbulence: 1,
+  airTurbulenceScale: 1,
+  glyphMassVariance: 1,
+  erosionIrregularity: 0.55,
+  glyphTilt: 1,
+  glyphDepth: 1,
+  motionBlur: 0.55,
   wingBeatFrequency: 2.8,
   butterflyOrbitRadius: 52,
   butterflyOrbitHeight: 34,

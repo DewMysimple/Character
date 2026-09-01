@@ -12,6 +12,16 @@ import {
   type ScenePointer,
   type Stage,
 } from "./types";
+import { clamp, easeInOut, easeOutCubic, seededRandom } from "./math";
+import {
+  AirField,
+  GLYPH_FONT,
+  getGlyphMetrics,
+  integrateGlyph,
+  primeGlyphMetrics,
+} from "./glyphPhysics";
+
+export { clamp, easeInOut, easeOutCubic, seededRandom };
 
 const CODE_LINES = [
   "const snapshot = this.undoHistory.pop();",
@@ -43,6 +53,11 @@ const CODE_PALETTE = [
   "#c58a62",
 ];
 
+// Card text and its falling particle must resolve to the same colour, or the
+// glyph visibly changes hue at the moment it breaks away.
+const getGlyphColor = (sourceLine: number, sourceColumn: number) =>
+  CODE_PALETTE[(sourceLine * 7 + sourceColumn) % CODE_PALETTE.length];
+
 const FLOWER_PALETTE = ["#bf8d8b", "#9aa89b", "#a8a0b8", "#c8a77f"];
 const COLLAPSE_CENTER_X = DESIGN_WIDTH / 2;
 const COLLAPSE_CENTER_Y = 304;
@@ -61,8 +76,26 @@ const COLUMN_COLLAPSE_CORE_RADIUS = 2;
 const COLUMN_COLLAPSE_OUTER_COLUMN_WIDTH = 1;
 const COLUMN_COLLAPSE_CORE_STAGGER = 0.08;
 const COLUMN_COLLAPSE_COLUMN_JITTER = 0.026;
-const COLLAPSE_START_TIME = 1.12;
-const SOURCE_GLYPH_FADE_DURATION = 0.14;
+const COLLAPSE_START_TIME = 0.95;
+const SOURCE_GLYPH_FADE_DURATION = 0.18;
+
+// Depth is a render-time projection about this point, so the physics stays
+// planar and deterministic while near glyphs still sweep past faster.
+const VANISH_X = DESIGN_WIDTH / 2;
+const VANISH_Y = 200;
+const DEPTH_SPREAD = 0.18;
+
+// A fully foreshortened plate is a line, and broadside is its most common
+// attitude, so glyphs would vanish for most of the fall. Clamp for legibility.
+const MIN_FORESHORTEN = 0.55;
+
+const BLUR_REFERENCE_SPEED = 260;
+const BLUR_STEP = 0.012;
+const BLUR_GHOSTS = 2;
+
+const PHYSICS_DT = 1 / 180;
+const AGENT_DT = 1 / 60;
+const MAX_PHYSICS_STEPS = 48;
 
 type ParticleSource = (typeof PARTICLE_POSITIONS)[number];
 type ParticleSourcePlan = {
@@ -86,26 +119,6 @@ export const STAGE_LABELS: Record<Stage, string> = {
   falling: "字符掉落",
   morphing: "蝴蝶生成",
   bloom: "花朵生长",
-};
-
-export const clamp = (value: number, min: number, max: number) =>
-  Math.min(max, Math.max(min, value));
-
-export const easeOutCubic = (value: number) => {
-  const t = clamp(value, 0, 1);
-  return 1 - (1 - t) ** 3;
-};
-
-export const easeInOut = (value: number) => {
-  const t = clamp(value, 0, 1);
-  return t < 0.5 ? 4 * t ** 3 : 1 - ((-2 * t + 2) ** 3) / 2;
-};
-
-const fract = (value: number) => value - Math.floor(value);
-
-export const seededRandom = (seed: number) => {
-  const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
-  return fract(value);
 };
 
 const roundedRect = (
@@ -162,7 +175,7 @@ const drawCodeCard = (
   context.arc(cardX + 40, cardY + 18, 3, 0, Math.PI * 2);
   context.fill();
 
-  context.font = "10px 'SFMono-Regular', Consolas, monospace";
+  context.font = GLYPH_FONT;
   context.textBaseline = "middle";
   const missingGlyphs = new Map(
     glyphs
@@ -183,7 +196,7 @@ const drawCodeCard = (
     const visibleLength = Math.ceil(line.length * reveal);
     [...line.slice(0, visibleLength)].forEach((character, characterIndex) => {
       const sourceFade = missingGlyphs.get(`${lineIndex}:${characterIndex}`) ?? 0;
-      const color = CODE_PALETTE[(lineIndex * 7 + characterIndex) % CODE_PALETTE.length];
+      const color = getGlyphColor(lineIndex, characterIndex);
       context.globalAlpha = 1 - sourceFade;
       context.fillStyle = character === " " ? "rgba(70, 68, 63, 0.52)" : color;
       context.fillText(character, cardX + 50 + characterIndex * CODE_CHAR_STEP, y);
@@ -365,6 +378,55 @@ const drawFlower = (
   context.restore();
 };
 
+/**
+ * Depth is applied as a render-time projection about the vanishing point, so
+ * the simulation stays planar and deterministic while near glyphs still sweep
+ * across faster than far ones. Anything that needs to know where a glyph
+ * *looks* like it is — the morph test, butterfly spawning — must use this.
+ */
+const projectGlyph = (glyph: GlyphParticle) => {
+  const scale = 1 + glyph.depth;
+  return {
+    x: VANISH_X + (glyph.x - VANISH_X) * scale,
+    y: VANISH_Y + (glyph.y - VANISH_Y) * scale,
+    scale,
+  };
+};
+
+const drawGlyphAt = (
+  context: CanvasRenderingContext2D,
+  char: string,
+  x: number,
+  y: number,
+  rotation: number,
+  tilt: number,
+  scale: number,
+  alpha: number,
+) => {
+  // cos(tilt) is the true foreshortening of a plate turning away from the
+  // viewer. Held above a floor because a plate broadside to the airflow — its
+  // most common attitude — would otherwise collapse to an invisible line.
+  const facing = Math.cos(tilt);
+  const direction = facing >= 0 ? 1 : -1;
+  const foreshorten =
+    direction * (MIN_FORESHORTEN + (1 - MIN_FORESHORTEN) * Math.abs(facing));
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+
+  context.save();
+  context.transform(
+    cos * scale,
+    sin * scale,
+    -sin * scale * foreshorten,
+    cos * scale * foreshorten,
+    x,
+    y,
+  );
+  context.globalAlpha = alpha;
+  context.fillText(char, 0, 0);
+  context.restore();
+};
+
 export const drawButterfly = (
   context: CanvasRenderingContext2D,
   butterfly: Butterfly,
@@ -422,10 +484,15 @@ export class SceneEngine {
   private viewport = { width: DESIGN_WIDTH, height: DESIGN_HEIGHT };
   private backgroundCanvas: HTMLCanvasElement | null = null;
   private pointer: ScenePointer | null = null;
+  private accumulator = 0;
+  private air: AirField;
+  private erosionPhaseA = 0;
+  private erosionPhaseB = 0;
 
   constructor(config: PhysicsConfig = DEFAULT_PHYSICS, seed = 47) {
     this.config = { ...config };
     this.seed = seed;
+    this.air = new AirField(seed);
     this.reset(seed);
   }
 
@@ -444,8 +511,15 @@ export class SceneEngine {
     const collapseChanged =
       nextConfig.collapseMode !== this.config.collapseMode ||
       nextConfig.collapseDuration !== this.config.collapseDuration;
+    // These three are baked into the glyphs at build time — release order,
+    // per-character mass and the depth layer — so they need a rebuild. Every
+    // other new parameter is a live coefficient read each step.
+    const rebuildChanged =
+      nextConfig.erosionIrregularity !== this.config.erosionIrregularity ||
+      nextConfig.glyphMassVariance !== this.config.glyphMassVariance ||
+      nextConfig.glyphDepth !== this.config.glyphDepth;
     this.config = { ...nextConfig };
-    if (particleCountChanged || collapseChanged) {
+    if (particleCountChanged || collapseChanged || rebuildChanged) {
       const currentTime = this.time;
       this.reset(this.seed);
       this.seek(currentTime);
@@ -456,10 +530,14 @@ export class SceneEngine {
     this.seed = seed;
     this.time = 0;
     this.motionTime = 0;
+    this.accumulator = 0;
     this.glyphs = [];
     this.butterflies = [];
     this.flowers = [];
     this.backgroundCanvas = null;
+    this.air = new AirField(seed);
+    this.erosionPhaseA = seededRandom(seed + 411) * Math.PI * 2;
+    this.erosionPhaseB = seededRandom(seed + 412) * Math.PI * 2;
     this.buildFlowers();
     this.buildGlyphs();
   }
@@ -471,26 +549,60 @@ export class SceneEngine {
       return;
     }
 
+    // Scrubbing replays glyphs with the same fixed step live playback uses, so
+    // seeking to t and playing to t land on the same state. Agents are
+    // kinematic and batch at frame rate, exactly as they do live.
     this.reset(this.seed);
     let remaining = target;
+    let agentDelta = 0;
     while (remaining > 0) {
-      const step = Math.min(1 / 60, remaining);
-      this.step(step);
+      const step = Math.min(PHYSICS_DT, remaining);
+      this.time = clamp(this.time + step, 0, SCENE_DURATION);
+      this.motionTime += step;
+      this.stepGlyphs(step);
       remaining -= step;
+      agentDelta += step;
+      if (agentDelta >= AGENT_DT) {
+        this.stepAgents(agentDelta);
+        agentDelta = 0;
+      }
     }
+    if (agentDelta > 0) this.stepAgents(agentDelta);
   }
 
   advance(realDelta: number) {
-    const delta = clamp(realDelta, 0, 0.05) * this.config.speed;
-    if (delta <= 0) return;
+    const scaled = clamp(realDelta, 0, 0.25) * this.config.speed;
+    if (scaled <= 0) return;
+    this.accumulator += scaled;
 
-    // Keep a dropped frame from turning into a visible physics jump. Normal
-    // frames still use one step; only a long frame is split into safe slices.
-    const substeps = Math.max(1, Math.ceil(delta * 60));
-    const substepDelta = delta / substeps;
-    for (let index = 0; index < substeps; index += 1) {
-      this.step(substepDelta);
+    // Aerodynamic torque is a stiff term, so glyphs integrate at a fixed
+    // 180Hz. That also makes the result independent of the display refresh
+    // rate, which per-frame damping never was.
+    const startTime = this.time;
+    let steps = 0;
+    while (this.accumulator >= PHYSICS_DT && steps < MAX_PHYSICS_STEPS) {
+      this.time = clamp(this.time + PHYSICS_DT, 0, SCENE_DURATION);
+      this.motionTime += PHYSICS_DT;
+      this.stepGlyphs(PHYSICS_DT);
+      this.accumulator -= PHYSICS_DT;
+      steps += 1;
     }
+    if (steps >= MAX_PHYSICS_STEPS) this.accumulator = 0;
+
+    // Butterflies and flowers are kinematic, so one update per frame is
+    // enough and keeps the substep cost off them.
+    const sceneDelta = this.time - startTime;
+    if (sceneDelta > 0) this.stepAgents(sceneDelta);
+  }
+
+  /** Read-only access for the calibration harness. Not used by the app. */
+  debugGlyphs(): readonly GlyphParticle[] {
+    return this.glyphs;
+  }
+
+  /** Read-only access for the calibration harness. Not used by the app. */
+  debugFlowers(): readonly Flower[] {
+    return this.flowers;
   }
 
   getSnapshot(): SceneSnapshot {
@@ -520,65 +632,54 @@ export class SceneEngine {
     this.butterflies.forEach((butterfly) => drawButterfly(context, butterfly));
   }
 
-  private step(delta: number) {
-    this.motionTime += delta;
-    this.time = clamp(this.time + delta, 0, SCENE_DURATION);
+  private stepGlyphs(delta: number) {
+    const isColumnCollapse = this.config.collapseMode === "column-collapse";
+    const isCenterCollapse = this.config.collapseMode === "center-collapse";
+    this.air.update(
+      this.motionTime,
+      this.config.airTurbulence,
+      this.config.airTurbulenceScale,
+    );
 
     this.glyphs.forEach((glyph) => {
       if (!glyph.active && this.time >= glyph.releaseAt) {
         glyph.active = true;
-        glyph.x = CODE_START_X + glyph.sourceColumn * CODE_CHAR_STEP;
+        // Spawn at the cell centre: the card draws left-aligned, the particle
+        // draws centred, so without this the glyph jumps half an advance.
+        glyph.x = CODE_START_X + glyph.sourceColumn * CODE_CHAR_STEP + CODE_CHAR_STEP / 2;
         glyph.y = CODE_START_Y + glyph.sourceLine * CODE_LINE_STEP;
-        glyph.vx =
-          this.config.collapseMode === "column-collapse"
-            ? (seededRandom(this.seed + glyph.sourceColumn * 2.61 + 41) - 0.5) * 0.035
-            : (seededRandom(glyph.seed + 23) - 0.5) * 0.28;
-        glyph.vy =
-          this.config.collapseMode === "column-collapse"
-            ? 0.012 + seededRandom(this.seed + glyph.sourceColumn * 3.17 + 91) * 0.025
-            : 0.008 + seededRandom(glyph.seed + 24) * 0.035;
+        glyph.releaseY = glyph.y;
+        // A whole column has to read as one gap, so column mode seeds its
+        // detach impulse from the column rather than the character.
+        glyph.vx = isColumnCollapse
+          ? (seededRandom(this.seed + glyph.sourceColumn * 2.61 + 41) - 0.5) * 2.1
+          : (seededRandom(glyph.seed + 23) - 0.5) * 17;
+        glyph.vy = isColumnCollapse
+          ? 0.7 + seededRandom(this.seed + glyph.sourceColumn * 3.17 + 91) * 1.5
+          : 0.5 + seededRandom(glyph.seed + 24) * 2.1;
       }
       if (!glyph.active) return;
 
       const glyphAge = Math.max(0, this.time - glyph.releaseAt);
-      const isColumnCollapse = this.config.collapseMode === "column-collapse";
-      const flutter = isColumnCollapse
-        ? Math.sin(glyphAge * 4.5 + glyph.sourceColumn * 0.63) * 0.14
-        : Math.sin(glyphAge * 18 + glyph.flutterPhase) * 0.23;
+      const centerPull = isCenterCollapse
+        ? (COLLAPSE_CENTER_X - glyph.x) * this.config.centerAttraction * 1.6
+        : 0;
 
-      const centerDrift =
-        this.config.collapseMode === "center-collapse"
-          ? (COLLAPSE_CENTER_X - glyph.x) * this.config.centerAttraction * 0.00045
-          : 0;
-      const turbulence = isColumnCollapse
-        ? Math.sin(glyphAge * 3.8 + glyph.sourceColumn * 0.47) * 0.008
-        : Math.sin(glyphAge * 9 + glyph.turbulencePhase) * 0.02;
-      const dropAcceleration =
-        this.config.gravity * (0.065 + clamp(glyphAge / 2.6, 0, 1) * 0.022);
-      const verticalJitter = isColumnCollapse
-        ? 0
-        : Math.cos(glyphAge * 7 + glyph.flutterPhase) * 0.0025;
-      glyph.vx +=
-        (this.config.wind * 0.002 + centerDrift + flutter * (isColumnCollapse ? 0.004 : 0.014) + turbulence) *
-        delta *
-        60;
-      glyph.vy +=
-        (dropAcceleration + verticalJitter) * delta * 60;
-      glyph.vy = Math.max(0, glyph.vy);
-      glyph.vx *= this.config.drag;
-      glyph.vy *= this.config.drag;
-      const glyphSpeed = Math.hypot(glyph.vx, glyph.vy);
-      if (glyphSpeed > 14) {
-        glyph.vx = (glyph.vx / glyphSpeed) * 14;
-        glyph.vy = (glyph.vy / glyphSpeed) * 14;
-      }
-      glyph.x += glyph.vx * delta * 60;
-      glyph.y += glyph.vy * delta * 60;
-      glyph.rotation += glyph.rotationSpeed * delta * 60;
+      integrateGlyph(
+        glyph,
+        this.config,
+        this.air.sampleX(glyph.x, glyph.y),
+        this.air.sampleY(glyph.x, glyph.y),
+        centerPull,
+        delta,
+      );
 
       const enoughDropTime = glyphAge >= 1.25;
-      const reachedFlowerZone = glyph.y >= glyph.morphThresholdY;
-      const safeFallback = this.time >= glyph.morphAt && glyph.y >= FLOWER_ZONE_MIN_Y - 70;
+      // Depth shifts where a glyph appears to be, so the flower zone test uses
+      // the projected position the viewer actually sees.
+      const projectedY = VANISH_Y + (glyph.y - VANISH_Y) * (1 + glyph.depth);
+      const reachedFlowerZone = projectedY >= glyph.morphThresholdY;
+      const safeFallback = this.time >= glyph.morphAt && projectedY >= FLOWER_ZONE_MIN_Y - 70;
       if (glyph.stage !== "morphing" && enoughDropTime && (reachedFlowerZone || safeFallback)) {
         glyph.stage = "morphing";
         glyph.morphAt = this.time;
@@ -595,10 +696,14 @@ export class SceneEngine {
         glyph.alpha = 1 - easeInOut(glyph.morphProgress);
       } else {
         glyph.stage = "falling";
-        glyph.alpha = 0.96;
+        // Fade in over the same window the card character fades out, so the
+        // handover reads as one glyph coming loose instead of a hard swap.
+        glyph.alpha = 0.96 * clamp(glyphAge / SOURCE_GLYPH_FADE_DURATION, 0, 1);
       }
     });
+  }
 
+  private stepAgents(delta: number) {
     this.updateFlowerPointer(delta);
 
     const orbitSpeed = clamp(this.config.butterflyOrbitSpeed, 0.2, 2.4);
@@ -675,8 +780,11 @@ export class SceneEngine {
         butterfly.vx += pointerDirectionX * repulsion * delta * 60;
         butterfly.vy += pointerDirectionY * repulsion * delta * 60;
       }
-      butterfly.vx *= 0.982;
-      butterfly.vy *= 0.982;
+      // Normalised by delta so the damping does not get stronger on a
+      // high-refresh display the way a per-frame multiply would.
+      const flightDamping = 0.982 ** (delta * 60);
+      butterfly.vx *= flightDamping;
+      butterfly.vy *= flightDamping;
       const flightSpeed = Math.hypot(butterfly.vx, butterfly.vy);
       const maxFlightSpeed = 6.4 * this.config.butterflyFlightSpeed;
       if (flightSpeed > maxFlightSpeed) {
@@ -736,10 +844,13 @@ export class SceneEngine {
   private buildGlyphs() {
     const count = Math.round(this.config.particleCount);
     const sources = this.getParticleSources(count, this.config.collapseMode);
+    primeGlyphMetrics(PARTICLE_POSITIONS.map((position) => position.char));
+    const depthSpread = DEPTH_SPREAD * clamp(this.config.glyphDepth, 0, 1.5);
     for (let index = 0; index < count; index += 1) {
       const seed = this.seed + index * 17.31;
       const sourcePlan = sources[index];
       const source = sourcePlan.source;
+      const metrics = getGlyphMetrics(source.char, this.config.glyphMassVariance);
       const collapseOrder = this.getCollapseOrder(source, this.config.collapseMode);
       const releaseOrder = sourcePlan.collapsible
         ? this.getIndependentReleaseOrder(collapseOrder, seed, this.config.collapseMode)
@@ -753,21 +864,28 @@ export class SceneEngine {
         char: source.char,
         x: DESIGN_WIDTH / 2,
         y: 314,
-        vx: (seededRandom(seed + 1) - 0.5) * 0.9,
-        vy: 0.4 + seededRandom(seed + 2) * 0.9,
+        vx: 0,
+        vy: 0,
         rotation: (seededRandom(seed + 4) - 0.5) * 0.6,
-        rotationSpeed: (seededRandom(seed + 5) - 0.5) * 0.04,
-        color: CODE_PALETTE[index % CODE_PALETTE.length],
+        rotationSpeed: (seededRandom(seed + 5) - 0.5) * 2.4,
+        tilt: (seededRandom(seed + 25) - 0.5) * 0.9,
+        tiltSpeed: (seededRandom(seed + 26) - 0.5) * 2.8,
+        depth: (seededRandom(seed + 27) - 0.5) * 2 * depthSpread,
+        mass: metrics.mass,
+        dragArea: metrics.dragArea,
+        chord: metrics.chord,
+        releaseY: CODE_START_Y + source.sourceLine * CODE_LINE_STEP,
+        color: getGlyphColor(source.sourceLine, source.sourceColumn),
         alpha: 0,
         stage: "intro",
         releaseAt,
+        // The safety fallback must sit past the natural fall time, or it would
+        // cut the (now slower) descent short before the glyph reaches the bed.
         morphAt: sourcePlan.collapsible
-          ? releaseAt + 1.6 + seededRandom(seed + 7) * 0.28
+          ? releaseAt + 2.9 + seededRandom(seed + 7) * 0.28
           : Number.POSITIVE_INFINITY,
         morphThresholdY:
           FLOWER_ZONE_MIN_Y + seededRandom(seed + 8) * (FLOWER_ZONE_MAX_Y - FLOWER_ZONE_MIN_Y),
-        flutterPhase: seededRandom(seed + 23) * Math.PI * 2,
-        turbulencePhase: seededRandom(seed + 24) * Math.PI * 2,
         morphProgress: 0,
         seed,
         sourceLine: source.sourceLine,
@@ -787,15 +905,24 @@ export class SceneEngine {
     const rowProgress = source.sourceLine / Math.max(1, CODE_LINES.length - 1);
 
     if (mode === "local-collapse") {
-      const columnDistance = Math.abs(source.sourceColumn - COLLAPSE_FOCUS_COLUMN);
-      const rowDistance = Math.abs(source.sourceLine - COLLAPSE_FOCUS_LINE) * 2.65;
-      const localDistance = Math.hypot(columnDistance, rowDistance);
+      const signedColumnDistance = source.sourceColumn - COLLAPSE_FOCUS_COLUMN;
+      const signedRowDistance = (source.sourceLine - COLLAPSE_FOCUS_LINE) * 2.65;
+      const localDistance = Math.hypot(signedColumnDistance, signedRowDistance);
       const maxDistance = Math.max(
         Math.hypot(COLLAPSE_FOCUS_COLUMN, COLLAPSE_FOCUS_LINE * 2.65),
         Math.hypot(MAX_CODE_COLUMN - COLLAPSE_FOCUS_COLUMN, (CODE_LINES.length - 1 - COLLAPSE_FOCUS_LINE) * 2.65),
       );
+      // Modulating the front radius by angle turns the breach from a tidy
+      // ellipse into a lobed hole that eats outward unevenly.
+      const erosion = clamp(this.config.erosionIrregularity, 0, 1);
+      const angle = Math.atan2(signedRowDistance, signedColumnDistance);
+      const radiusScale =
+        1 +
+        erosion * 0.34 * Math.sin(angle * 3 + this.erosionPhaseA) +
+        erosion * 0.18 * Math.sin(angle * 5.7 + this.erosionPhaseB);
+      const shapedDistance = localDistance / Math.max(0.35, radiusScale);
       const normalizedDistance = clamp(
-        (localDistance - 1.2) / Math.max(1, maxDistance - 1.2),
+        (shapedDistance - 1.2) / Math.max(1, maxDistance - 1.2),
         0,
         1,
       );
@@ -826,9 +953,15 @@ export class SceneEngine {
     // Spatial propagation gives the collapse its local breach. A second,
     // character-specific component prevents equal-distance glyphs from
     // releasing as a visible row or a three-character batch.
-    const characterNoise = seededRandom(seed + 29);
-    const noiseWeight = mode === "local-collapse" ? 0.34 : 0.22;
-    return clamp(collapseOrder * (1 - noiseWeight) + characterNoise * noiseWeight, 0, 1);
+    //
+    // The jitter is additive and local rather than a blend against the whole
+    // span: blending let a centre glyph and an edge glyph release at nearly
+    // the same time, which dissolved the entire card at once instead of
+    // opening one hole that grows. This width still scatters neighbours by a
+    // few tenths of a second, which is what breaks up the rows.
+    const characterNoise = seededRandom(seed + 29) - 0.5;
+    const jitterWidth = mode === "local-collapse" ? 0.12 : 0.09;
+    return clamp(collapseOrder + characterNoise * jitterWidth, 0, 1);
   }
 
   private getColumnCollapseReleaseOrder(sourceColumn: number) {
@@ -1015,12 +1148,18 @@ export class SceneEngine {
       targetFlower.x + targetFlower.sway * 0.45 + flowerOffsetX;
     const flowerY = targetFlower.groundY - targetFlower.height;
     const baseScale = 0.43 + seededRandom(glyph.seed + 12) * 0.36;
+    // Hand over at the glyph's *projected* position, or a depth-shifted glyph
+    // would jump at the moment it becomes a butterfly.
+    const handover = projectGlyph(glyph);
+    // Glyph velocity is px/s; butterfly velocity is px per 60Hz frame.
+    const handoverVx = (glyph.vx / 60) * handover.scale;
+    const handoverVy = (glyph.vy / 60) * handover.scale;
     const butterfly: Butterfly = {
       id,
-      x: glyph.x,
-      y: glyph.y,
-      vx: glyph.vx * 0.45 + (seededRandom(glyph.seed + 9) - 0.5) * 1.2,
-      vy: glyph.vy * 0.08 + seededRandom(glyph.seed + 10) * 0.18,
+      x: handover.x,
+      y: handover.y,
+      vx: handoverVx * 0.45 + (seededRandom(glyph.seed + 9) - 0.5) * 1.2,
+      vy: handoverVy * 0.08 + seededRandom(glyph.seed + 10) * 0.18,
       rotation: glyph.rotation,
       rotationSpeed: (seededRandom(glyph.seed + 11) - 0.5) * 0.032,
       scale: baseScale * this.config.butterflyScale,
@@ -1061,18 +1200,52 @@ export class SceneEngine {
 
   private renderGlyphs(context: CanvasRenderingContext2D) {
     context.save();
-    context.font = "12px 'SFMono-Regular', Consolas, monospace";
+    context.font = GLYPH_FONT;
     context.textAlign = "center";
     context.textBaseline = "middle";
+    const blurStrength = clamp(this.config.motionBlur, 0, 1.5);
+
     this.glyphs.forEach((glyph) => {
       if (!glyph.active || glyph.alpha <= 0.015) return;
-      context.save();
-      context.translate(glyph.x, glyph.y);
-      context.rotate(glyph.rotation);
-      context.globalAlpha = glyph.alpha;
+
+      const projected = projectGlyph(glyph);
+      // Atmospheric perspective: only the far layer washes out.
+      const alpha =
+        glyph.alpha * clamp(1 - Math.max(0, -glyph.depth) * 0.9, 0.4, 1);
+      if (alpha <= 0.015) return;
+
       context.fillStyle = glyph.color;
-      context.fillText(glyph.char, 0, 0);
-      context.restore();
+
+      const speed = Math.hypot(glyph.vx, glyph.vy);
+      const blur = clamp(speed / BLUR_REFERENCE_SPEED, 0, 1) * blurStrength;
+      if (blur > 0.05) {
+        // Ghosts rewind attitude as well as position, so the smear follows the
+        // tumble instead of reading as a flat translation.
+        for (let ghost = BLUR_GHOSTS; ghost >= 1; ghost -= 1) {
+          const back = ghost * BLUR_STEP;
+          drawGlyphAt(
+            context,
+            glyph.char,
+            projected.x - glyph.vx * back * projected.scale,
+            projected.y - glyph.vy * back * projected.scale,
+            glyph.rotation - glyph.rotationSpeed * back,
+            glyph.tilt - glyph.tiltSpeed * back,
+            projected.scale,
+            (alpha * blur * 0.3) / ghost,
+          );
+        }
+      }
+
+      drawGlyphAt(
+        context,
+        glyph.char,
+        projected.x,
+        projected.y,
+        glyph.rotation,
+        glyph.tilt,
+        projected.scale,
+        alpha,
+      );
     });
     context.restore();
   }
